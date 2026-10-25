@@ -195,6 +195,7 @@ nav.tabs button[aria-current="page"]{color:var(--accent)}
       <button class="btn primary" type="submit">Anotar</button>
     </div>
     <input type="file" id="camIn" accept="image/*" capture="environment" hidden>
+    <input type="file" id="fileIn" accept="image/*,application/pdf,.pdf" hidden>
     <div class="chips" id="hints">
       <button type="button" class="chip">gasté 12 lucas en el súper</button>
       <button type="button" class="chip">cobré el sueldo, 850 lucas</button>
@@ -288,7 +289,7 @@ function wordsToDigits(text){
 /* ---------- estado ---------- */
 const state = {
   items: [], // movimientos y cuotas
-  settings: { income: {amount:0, currency:"ARS"}, rate: 1200, rateName: "Blue", view: "ARS", cards: [{n:"Visa",cierre:25},{n:"Mastercard",cierre:22}], defCard:"Visa", budgets:{}, learned:{} },
+  settings: { income: {amount:0, currency:"ARS"}, rate: 1565, rateName: "Blue", rateAuto: true, rateUpdated: null, view: "ARS", cards: [{n:"Visa",cierre:25},{n:"Mastercard",cierre:22}], defCard:"Visa", budgets:{}, learned:{} },
   tab: "inicio",
   month: monthKey(new Date()),
   lastAdded: null
@@ -389,7 +390,7 @@ async function compressImage(file){
   return {blob, url:c.toDataURL("image/jpeg",0.5)};
 }
 async function readReceipt(blob){
-  const prompt = `La imagen es una foto de una factura, ticket o comprobante de compra en Argentina (puede ser una captura de una transferencia o de Mercado Pago).
+  const prompt = `El archivo es una factura, ticket o comprobante de compra en Argentina: puede ser una foto, una captura de pantalla de un mail, de una transferencia o de Mercado Pago, o una factura electrónica en PDF (en ese caso usá el "Importe Total" final, con impuestos).
 Devolvé SOLO un objeto JSON con: comercio (nombre corto del local), total (número final pagado, sin separadores de miles), moneda ("ARS" o "USD"), fecha ("AAAA-MM-DD" o null), categoria (una de: ${CAT_LIST}), cuotas (entero, 1 si no figura), tarjeta (marca si figura, si no null), tipo ("gasto" salvo que sea un cobro recibido).
 Si no se puede leer el total, devolvé {"error":"ilegible"}.`;
   return sampleFn.json(prompt,{images:[blob], modelTier:"default"});
@@ -573,7 +574,7 @@ function renderHome(){
     <div class="balance">
       <div class="sechead"><span class="label">Saldo del mes</span>${curToggle()}</div>
       <div class="big ${bal<0?"neg":""}">${money(bal,v)}</div>
-      <div class="rate muted">Dólar ${esc(state.settings.rateName)} a ${money(state.settings.rate,"ARS")} · <button class="chip" data-go="ajustes" style="padding:1px 8px">cambiar</button>${usdHeld? ` · Movimiento en dólares: <span class="num">${money(usdHeld,"USD")}</span>`:""}</div>
+      <div class="rate muted">Dólar ${esc(state.settings.rateName)} a ${money(state.settings.rate,"ARS")}${state.settings.rateAuto&&state.settings.rateUpdated?` (${rateWhen()})`:state.settings.rateAuto?"":" (manual)"} · <button class="chip" data-go="ajustes" style="padding:1px 8px">cambiar</button>${usdHeld? ` · Movimiento en dólares: <span class="num">${money(usdHeld,"USD")}</span>`:""}</div>
     </div>
     <div class="trio">
       <div><div class="label">Ingresos</div><div class="v">${money(inc,v)}</div></div>
@@ -720,10 +721,12 @@ function renderSettings(){
     <section class="card">
       <span class="label">Cotización del dólar</span>
       <div class="grid2">
-        <div class="field"><label for="rateName">Tipo</label><select id="rateName">${["Blue","MEP","Oficial","Tarjeta","Cripto"].map(n=>`<option ${n===s.rateName?"selected":""}>${n}</option>`).join("")}</select></div>
-        <div class="field"><label for="rateVal">Precio de venta ($)</label><input id="rateVal" class="num" inputmode="decimal" value="${s.rate}"></div>
+        <div class="field"><label for="rateName">Tipo</label><select id="rateName">${["Blue","MEP","CCL","Oficial","Tarjeta","Cripto"].map(n=>`<option ${n===s.rateName?"selected":""}>${n}</option>`).join("")}</select></div>
+        <div class="field"><label for="rateVal">Precio de venta ($)</label><input id="rateVal" class="num" inputmode="decimal" value="${s.rate}" ${s.rateAuto?"readonly":""}></div>
       </div>
-      <p class="note" style="margin:0">Se usa para pasar todo a una sola moneda. Actualizalo cuando quieras con el valor del día.</p>
+      <div class="seg" role="group" aria-label="Cómo se actualiza"><button type="button" data-ra="1" aria-pressed="${!!s.rateAuto}">Automático</button><button type="button" data-ra="0" aria-pressed="${!s.rateAuto}">Manual</button></div>
+      <p class="note" style="margin:0">${s.rateAuto ? (s.rateError ? `Sin conexión: uso el último valor${s.rateUpdated?` (${rateWhen()})`:""}.` : s.rateUpdated ? `Actualizado ${rateWhen()} desde DolarApi, que toma los valores de DolarHoy y otras fuentes.` : "Buscando la cotización…") : "Modo manual: el precio queda fijo hasta que lo cambies o vuelvas a Automático."}</p>
+      ${s.rateAuto?'<div class="row"><button class="btn ghost" id="rateNow">Actualizar ahora</button></div>':""}
     </section>
     <section class="card">
       <span class="label">Tarjetas y día de cierre</span>
@@ -752,8 +755,10 @@ function renderSettings(){
     </section>
   </div>`;
   const q=id=>$view.querySelector(id);
-  q("#rateName").onchange=e=>{ s.rateName=e.target.value; saveSettings(); };
-  q("#rateVal").onchange=e=>{ const v=num(e.target.value.replace(/\.(?=\d{3})/g,"")); if(v>0){ s.rate=v; saveSettings(); } };
+  q("#rateName").onchange=e=>{ s.rateName=e.target.value; saveSettings(); updateRate(true); };
+  $view.querySelectorAll("[data-ra]").forEach(b=>b.onclick=()=>{ s.rateAuto=b.dataset.ra==="1"; saveSettings(); if(s.rateAuto) updateRate(true); });
+  if(q("#rateNow")) q("#rateNow").onclick=()=>updateRate(true);
+  q("#rateVal").onchange=e=>{ const v=num(e.target.value.replace(/\.(?=\d{3})/g,"")); if(v>0){ s.rate=v; s.rateAuto=false; saveSettings(); } };
   $view.querySelectorAll("[data-cn]").forEach(i=>i.onchange=()=>{ const old=s.cards[i.dataset.cn].n; s.cards[i.dataset.cn].n=i.value.trim()||old; if(s.defCard===old) s.defCard=s.cards[i.dataset.cn].n; saveSettings(); });
   $view.querySelectorAll("[data-cc]").forEach(i=>i.onchange=()=>{ const v=Math.min(31,Math.max(1,parseInt(i.value,10)||25)); s.cards[i.dataset.cc].cierre=v; saveSettings(); });
   $view.querySelectorAll("[data-cdel]").forEach(b=>b.onclick=()=>{ if(s.cards.length<=1) return; s.cards.splice(+b.dataset.cdel,1); if(!s.cards.find(c=>c.n===s.defCard)) s.defCard=s.cards[0].n; saveSettings(); });
@@ -789,7 +794,7 @@ function openForm(p, existing, photoURL){
     if(!cats.includes(f.cat)) f.cat=cats[0];
     root.innerHTML = `<div class="sheet-bg" id="sbg"><form class="sheet" id="sform" role="dialog" aria-label="Movimiento">
       <div class="sechead"><h2>${existing?"Editar":"Revisá y guardá"}</h2><button type="button" class="chip" id="sclose">Cerrar</button></div>
-      ${photoURL?`<img class="thumb" src="${photoURL}" alt="Foto de la factura">`:""}
+      ${photoURL && photoURL.startsWith("data:") ?`<img class="thumb" src="${photoURL}" alt="Foto de la factura">`: photoURL ? `<div class="check"><b>PDF</b><span class="muted" style="overflow-wrap:anywhere">${esc(photoURL)}</span></div>`:""}
       <div class="seg" role="group"><button type="button" data-t="gasto" aria-pressed="${f.tipo==="gasto"}">Gasto</button><button type="button" data-t="ingreso" aria-pressed="${f.tipo==="ingreso"}">Ingreso</button></div>
       <div class="grid2">
         <div class="field"><label for="fAmt">${f.cuotas>1?"Total de la compra":"Monto"}</label><input id="fAmt" class="num" inputmode="decimal" value="${f.amount===""?"":f.amount}" required></div>
@@ -871,34 +876,91 @@ document.getElementById("micBtn").onclick=()=>{
   try{ rec.start(); }catch(e){ showToast("No pude abrir el micrófono. Probá de nuevo."); }
 };
 document.getElementById("camBtn").onclick=()=>{
-  if(!canImages){ showToast("Para leer facturas con foto, cargá tu clave de Gemini en Ajustes. Mientras, cargala a mano."); openForm({tipo:"gasto",amount:"",currency:"ARS",cat:"otros",desc:"",cuotas:1,card:null},null); return; }
-  document.getElementById("camIn").click();
+  if(!canImages){ showToast("Para leer facturas, cargá tu clave de Gemini en Ajustes. Mientras, cargala a mano."); openForm({tipo:"gasto",amount:"",currency:"ARS",cat:"otros",desc:"",cuotas:1,card:null},null); return; }
+  const root=document.getElementById("sheetRoot");
+  root.innerHTML=`<div class="sheet-bg" id="pbg"><div class="sheet" role="dialog" aria-label="Cargar factura">
+    <div class="sechead"><h2>Cargar factura</h2><button type="button" class="chip" id="pclose">Cerrar</button></div>
+    <button class="btn primary" id="pCam">Sacar foto</button>
+    <button class="btn ghost" id="pFile">Elegir PDF o captura</button>
+    <p class="note" style="margin:0">¿Te llegó por mail? Abrila en Gmail, tocá Compartir y elegí Bolsillo.</p>
+  </div></div>`;
+  const close=()=>{ root.innerHTML=""; };
+  root.querySelector("#pclose").onclick=close;
+  root.querySelector("#pbg").onclick=e=>{ if(e.target.id==="pbg") close(); };
+  root.querySelector("#pCam").onclick=()=>{ close(); document.getElementById("camIn").click(); };
+  root.querySelector("#pFile").onclick=()=>{ close(); document.getElementById("fileIn").click(); };
 };
-document.getElementById("camIn").onchange=async e=>{
-  const file=e.target.files[0]; e.target.value=""; if(!file) return;
-  busyToast("Leyendo la factura…");
+async function processReceiptFile(file){
+  if(!canImages){ showToast("Para leer facturas, cargá tu clave de Gemini en Ajustes."); return; }
+  const isPDF = file.type==="application/pdf" || /\.pdf$/i.test(file.name||"");
+  if(!isPDF && !/^image\//.test(file.type||"")){ showToast("Ese archivo no es una foto ni un PDF."); return; }
+  if(file.size > 18*1024*1024){ showToast("El archivo es muy pesado (más de 18 MB)."); return; }
+  busyToast(isPDF ? "Leyendo el PDF…" : "Leyendo la factura…");
   try{
-    const {blob,url}=await compressImage(file);
+    let blob, preview;
+    if(isPDF){ blob = file.type==="application/pdf" ? file : new Blob([file],{type:"application/pdf"}); preview = file.name || "factura.pdf"; }
+    else { const c=await compressImage(file); blob=c.blob; preview=c.url; }
     const r=await readReceipt(blob);
     document.getElementById("toast").hidden=true;
-    if(!r || r.error || !(+r.total>0)){ showToast("No pude leer el total. Completalo a mano."); openForm({tipo:"gasto",amount:"",currency:"ARS",cat:"otros",desc:r?.comercio||"",cuotas:1,card:null},null,url); return; }
+    if(!r || r.error || !(+r.total>0)){ showToast("No pude leer el total. Completalo a mano."); openForm({tipo:"gasto",amount:"",currency:"ARS",cat:"otros",desc:r?.comercio||"",cuotas:1,card:null},null,preview); return; }
     const cat = CATS[r.categoria]? r.categoria : guessCat(r.comercio||"","gasto");
     let card=null; if(r.tarjeta){ const c=state.settings.cards.find(c=>new RegExp(c.n.split(" ")[0],"i").test(r.tarjeta)); card=c?c.n:null; }
-    openForm({tipo:r.tipo==="ingreso"?"ingreso":"gasto", amount:+r.total, currency:r.moneda==="USD"?"USD":"ARS", cat, desc:cap(r.comercio||"Compra"), cuotas:Math.max(1,parseInt(r.cuotas||1,10)), card, date:/^\d{4}-\d{2}-\d{2}$/.test(r.fecha||"")?r.fecha:todayISO()}, null, url);
+    openForm({tipo:r.tipo==="ingreso"?"ingreso":"gasto", amount:+r.total, currency:r.moneda==="USD"?"USD":"ARS", cat, desc:cap(r.comercio||"Compra"), cuotas:Math.max(1,parseInt(r.cuotas||1,10)), card, date:/^\d{4}-\d{2}-\d{2}$/.test(r.fecha||"")?r.fecha:todayISO()}, null, preview);
   }catch(err){
     if(err && err.code==="rate_limited") showToast("Llegaste al límite gratis de Gemini por ahora. Esperá un minuto y probá de nuevo.");
     else if(err && err.code==="bad_key") showToast("Gemini rechazó la clave. Revisala en Ajustes.");
     else if(err && err.code==="bad_model") showToast("Ese modelo de Gemini no existe. Revisá el nombre en Ajustes.");
     else if(err && err.code==="offline") { showToast("Sin conexión: cargala a mano."); openForm({tipo:"gasto",amount:"",currency:"ARS",cat:"otros",desc:"",cuotas:1,card:null},null); }
-    else showToast("No pude leer la foto. Probá con más luz y el ticket entero en cuadro.");
+    else showToast(isPDF ? "No pude leer el PDF. Probá con una captura de la factura." : "No pude leer la foto. Probá con más luz y el ticket entero en cuadro.");
   }
-};
+}
+document.getElementById("camIn").onchange=e=>{ const f=e.target.files[0]; e.target.value=""; if(f) processReceiptFile(f); };
+document.getElementById("fileIn").onchange=e=>{ const f=e.target.files[0]; e.target.value=""; if(f) processReceiptFile(f); };
+
+/* llega algo desde el menú Compartir de Android */
+async function handleShared(){
+  if(!/[?&]compartido=1/.test(location.search)) return;
+  history.replaceState(null,"",location.pathname);
+  try{
+    const c=await caches.open("bolsillo-compartido");
+    const fr=await c.match("archivo"); const tr=await c.match("texto");
+    const text = tr ? (await tr.text()).trim() : "";
+    await c.delete("archivo"); await c.delete("texto");
+    if(fr){ const blob=await fr.blob(); const name=decodeURIComponent(fr.headers.get("x-nombre")||"factura"); processReceiptFile(new File([blob],name,{type:blob.type})); return; }
+    if(text){ const inp=document.getElementById("quickIn"); inp.value=text.slice(0,300); inp.focus(); showToast("Recibí este texto. Revisalo y tocá Anotar."); return; }
+    showToast("No llegó ningún archivo. Probá compartir la factura de nuevo.");
+  }catch(e){ showToast("No pude abrir lo que compartiste."); }
+}
+
+/* cotización automática desde DolarApi (toma los valores de DolarHoy y otras fuentes) */
+const CASAS={Blue:"blue",MEP:"bolsa",Oficial:"oficial",Tarjeta:"tarjeta",Cripto:"cripto",CCL:"contadoconliqui"};
+let rateBusy=false;
+async function updateRate(force){
+  const s=state.settings; if(!s.rateAuto || rateBusy) return;
+  if(!force && s.rateUpdated && Date.now()-s.rateFetchedAt < 30*60*1000) return;
+  rateBusy=true;
+  try{
+    const res=await fetch("https://dolarapi.com/v1/dolares",{cache:"no-store"});
+    if(!res.ok) throw 0;
+    const list=await res.json(); const d=list.find(x=>x.casa===CASAS[s.rateName]);
+    if(d && +d.venta>0){ s.rate=+d.venta; s.rateUpdated=d.fechaActualizacion||new Date().toISOString(); s.rateFetchedAt=Date.now(); s.rateError=false; saveSettings(); }
+  }catch(e){ s.rateError=true; render(); }
+  rateBusy=false;
+}
+function rateWhen(){
+  const s=state.settings; if(!s.rateUpdated) return "";
+  const d=new Date(s.rateUpdated); const today=new Date().toDateString()===d.toDateString();
+  return (today?"hoy ":d.toLocaleDateString("es-AR",{day:"numeric",month:"short"})+" ")+d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"});
+}
 document.getElementById("prevM").onclick=()=>{ state.month=addMonths(state.month,-1); render(); };
 document.getElementById("nextM").onclick=()=>{ state.month=addMonths(state.month,1); render(); };
 document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>{ state.tab=b.dataset.tab; render(); window.scrollTo(0,0); });
 
 /* ---------- arranque ---------- */
 setupGemini(); lsLoad(); render();
+updateRate(false); setInterval(()=>updateRate(false), 5*60*1000);
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden) updateRate(false); });
+handleShared();
 // pedir al navegador que no borre los datos
 try{ navigator.storage && navigator.storage.persist && navigator.storage.persist(); }catch(e){}
 if("serviceWorker" in navigator){ window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(()=>{}); }); }
