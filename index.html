@@ -65,6 +65,9 @@ header.top{display:flex;align-items:center;justify-content:space-between;gap:12p
 .btn svg{width:20px;height:20px}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{border:1px dashed var(--line);background:transparent;border-radius:999px;padding:4px 10px;font-size:.82rem;color:var(--muted)}
+.toast span{min-width:0;overflow-wrap:anywhere}
+.wrap,.wrap > *{min-width:0}
+.alert,.ledger .ln span:first-child{overflow-wrap:anywhere;min-width:0}
 .toast{font-size:.9rem;padding:8px 10px;border-radius:10px;background:var(--sunk);display:flex;justify-content:space-between;gap:8px;align-items:center}
 .toast button{border:0;background:none;color:var(--accent);font-weight:600}
 
@@ -269,15 +272,25 @@ function wordsToDigits(text){
         if(x==="y" && seq.length){ const nx=(toks[j+2]||"").toLowerCase(); if(nx in NUMW){ j++; continue; } }
         break;
       }
+      // "15 mil" o "2 millones": el número ya está en cifras, la unidad la resuelve parseAmount
+      const prevTok=(out.slice().reverse().find(t=>!/^\s*$/.test(t))||"").trim();
+      let startCur=0;
+      if(/^(mil|mill[oó]n(es)?)$/.test(seq[0]) && /^\d+([.,]\d+)?$/.test(prevTok)){
+        if(seq.length===1){ out.push(toks[i]); i++; continue; }
+        // "2 mil quinientos": junto la cifra con las palabras
+        for(let k=out.length-1;k>=0;k--){ if(out[k].trim()){ out.splice(k,1); break; } }
+        startCur=num(prevTok);
+      }
       // "un/una/medio" solos solo cuentan si los sigue una unidad (un palo, una luca, medio palo)
       const next=(toks.slice(j).find(t=>!/\s/.test(t))||"").toLowerCase();
       if(seq.length===1 && ["un","uno","una","medio","media"].includes(seq[0]) && !UNIT.test(next)){ out.push(toks[i]); i++; continue; }
-      let total=0, cur=0;
-      for(const x of seq){
-        if(x==="mil"){ total += (cur||1)*1000; cur=0; }
-        else if(/^mill/.test(x)){ total = (total+(cur||1))*1e6; cur=0; }
+      let total=0, cur=startCur, lastMult=1;
+      seq.forEach((x,k)=>{
+        if(x==="mil"){ total += (cur||1)*1000; cur=0; lastMult=1000; }
+        else if(/^mill/.test(x)){ total = (total+(cur||1))*1e6; cur=0; lastMult=1e6; }
+        else if((x==="medio"||x==="media") && k>0 && lastMult>1){ total += lastMult/2; }
         else cur += NUMW[x];
-      }
+      });
       out.push(String(total+cur)+" ");
       i=j; continue;
     }
@@ -321,20 +334,45 @@ function parseAmount(text){
   const t = text.toLowerCase().replace(/\$/g," ");
   const palosVerdes = t.match(/(\d+(?:[.,]\d+)?)\s*palos?\s+verdes?/);
   if(palosVerdes) return {amount: num(palosVerdes[1])*1000, forceUSD:true, raw:palosVerdes[0]};
-  if(/\bun palo verde\b/.test(t)) return {amount:1000, forceUSD:true, raw:"un palo verde"};
-  const rx = /(\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:[.,]\d+)?)\s*(lucas?|luquitas?|k|mil|palos?|millones?|millón|mill[oó]n|m\b|mangos?)?/g;
+  if(/(^|\s)un palo verde(\s|$)/.test(t)) return {amount:1000, forceUSD:true, raw:"un palo verde"};
+  const rx = /(\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:[.,]\d+)?)\s*(lucas?|luquitas?|k|mil|palos?|millones?|mill[oó]n|m(?![a-záéíóú])|mangos?)?(\s+y\s+medi[oa])?/g;
   let m, best=null;
   while((m=rx.exec(t))){
     // ignorar el número de cuotas
     const after = t.slice(m.index+m[0].length, m.index+m[0].length+8);
     if(/^\s*cuotas?/.test(after) && !m[2]) continue;
-    if(/^\s*(de|del)\s/.test(t.slice(m.index-4,m.index)) && false) continue;
-    let v = num(m[1]); const u=(m[2]||"").trim();
-    if(/^(lucas?|luquitas?|k|mil)$/.test(u)) v*=1000;
-    else if(/^(palos?|millones?|millón|mill[oó]n|m)$/.test(u)) v*=1e6;
-    if(!best || v>best.amount) best={amount:v, raw:m[0]};
+    let v = num(m[1]); const u=(m[2]||"").trim(); let mult=1;
+    if(/^(lucas?|luquitas?|k|mil)$/.test(u)) mult=1000;
+    else if(/^(palos?|millones?|mill[oó]n|m)$/.test(u)) mult=1e6;
+    v*=mult;
+    if(m[3] && mult>1) v += mult/2;          // "una luca y media", "un palo y medio"
+    if(!best || v>best.amount) best={amount:v, raw:m[0], index:m.index};
   }
   return best;
+}
+
+/* fechas habladas: "ayer", "anteayer", "el viernes", "el 20", "20/10" */
+const DIAS = {domingo:0,lunes:1,martes:2,"miércoles":3,miercoles:3,jueves:4,viernes:5,"sábado":6,sabado:6};
+function isoOf(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function parseDate(text){
+  const t=" "+text.toLowerCase()+" "; const now=new Date(); now.setHours(12,0,0,0);
+  const back = n => { const d=new Date(now); d.setDate(d.getDate()-n); return d; };
+  let m;
+  if((m=t.match(/\s(anteayer|antes de ayer|antier)(?=[\s,.!?])/))) return {date:isoOf(back(2)), raw:m[1]};
+  if((m=t.match(/\s(ayer)(?=[\s,.!?])/))) return {date:isoOf(back(1)), raw:m[1]};
+  if((m=t.match(/\s((?:el\s+)?(domingo|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado)(?:\s+pasado)?)(?=[\s,.!?])/))){
+    const target=DIAS[m[2]] ?? DIAS[m[2].normalize("NFD").replace(/[̀-ͯ]/g,"")];
+    const diff=(now.getDay()-target+7)%7; return {date:isoOf(back(diff)), raw:m[1]};
+  }
+  if((m=t.match(/\s((\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?)(?=[\s,.!?])/))){
+    const dd=+m[2], mm=+m[3]; let yy=m[4]? +m[4] : now.getFullYear(); if(yy<100) yy+=2000;
+    if(dd>=1&&dd<=31&&mm>=1&&mm<=12){ let d=new Date(yy,mm-1,dd,12); if(!m[4] && d>now) d=new Date(yy-1,mm-1,dd,12); return {date:isoOf(d), raw:m[1]}; }
+  }
+  if((m=t.match(/\s(el\s+(?:d[ií]a\s+)?(\d{1,2}))(?!\s*(?:[.,]\d|lucas?|luquitas?|k\b|mil|palos?|mill|pesos?|mangos?|d[oó]lar|verdes?|cuotas?|%))(?=[\s,.!?])/))){
+    const dd=+m[2];
+    if(dd>=1&&dd<=31){ let d=new Date(now.getFullYear(),now.getMonth(),dd,12); if(d>now) d=new Date(now.getFullYear(),now.getMonth()-1,dd,12); return {date:isoOf(d), raw:m[1]}; }
+  }
+  return null;
 }
 function num(s){
   s=String(s);
@@ -349,23 +387,38 @@ function guessCat(text, tipo){
   for(const [cat,list] of Object.entries(KW)){ for(const k of list){ if(new RegExp("[^a-záéíóúñ]"+k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"[^a-záéíóúñ]").test(t)) return cat; } }
   return "otros";
 }
+const CADA_RX = /(cada un[oa]|c\/u|cada cuota|por cuota|por mes cada)/i;
 function parseLocal(text){
   text = wordsToDigits(text);
+  const dt = parseDate(text);
+  if(dt) text = text.replace(new RegExp(dt.raw.replace(/[.*+?^${}()|[\]\\/]/g,"\\$&"),"i")," ").replace(/\s+/g," ").trim();
   const a = parseAmount(text); if(!a || !(a.amount>0)) return null;
   const fijo = !ING_RX.test(text) && FIJO_RX.test(text);
   const tipo = ING_RX.test(text) ? "ingreso" : "gasto";
   const currency = (a.forceUSD || USD_RX.test(text)) ? "USD" : "ARS";
-  const cm = text.match(/(\d+)\s*cuotas?/i);
+  const low = text.toLowerCase().replace(/\$/g," ");
+  const cm = low.match(/(\d+)\s*cuotas?/);
   const cuotas = tipo==="gasto" && cm ? Math.max(1,parseInt(cm[1],10)) : 1;
+  let amount = a.amount;
+  // "3 cuotas de 20 lucas" o "... cada una" con cuotas: el monto es por cuota
+  const before = low.slice(Math.max(0,(a.index??0)-24), a.index??0);
+  if(cuotas>1 && !fijo && (/cuotas?\s+de\s*$/.test(before) || CADA_RX.test(low))) amount = a.amount*cuotas;
+  // "2 remeras a 15 mil cada una": multiplica por la cantidad
+  else if(cuotas===1 && CADA_RX.test(low)){
+    const rest = low.slice(0,a.index??0) + " " + low.slice((a.index??0)+a.raw.length);
+    const q = rest.match(/(^|\s)(\d{1,2})(?=\s+[a-záéíóúñ])/);
+    if(q && +q[2]>=2) amount = a.amount * (+q[2]);
+  }
   let card = null;
-  for(const c of state.settings.cards){ if(new RegExp("\\b"+c.n.split(" ")[0]+"\\b","i").test(text)) card=c.n; }
+  for(const c of state.settings.cards){ const w=c.n.split(" ")[0].toLowerCase(); if(new RegExp("(^|\\s)"+w.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"(?=$|[\\s,.!?])","i").test(low)) card=c.n; }
   if(cuotas>1 && !card) card = state.settings.defCard;
-  const STOP = new Set(["gasté","gaste","pagué","pague","compré","compre","cobré","cobre","me","pagaron","en","de","del","el","la","los","las","un","una","con","por","pesos","peso","mangos","mango","dólares","dolares","dólar","dolar","usd","u$s","us$","verde","verdes","lucas","luca","cuota","cuotas","y","al","a","mi","para","hoy","ayer","palo","palos","todos","meses","mes","cada","x","mensual","mensuales","mensualmente","fijo","millones","millón","millon","mil"]);
+  const STOP = new Set(["gasté","gaste","pagué","pague","compré","compre","cobré","cobre","me","pagaron","en","de","del","el","la","los","las","un","una","uno","con","por","pesos","peso","mangos","mango","dólares","dolares","dólar","dolar","usd","u$s","us$","verde","verdes","lucas","luca","cuota","cuotas","y","al","a","mi","para","hoy","ayer","palo","palos","todos","meses","mes","cada","c/u","x","mensual","mensuales","mensualmente","fijo","millones","millón","millon","mil","medio","media"]);
   if(card) STOP.add(card.toLowerCase().split(" ")[0]);
-  let desc = text.toLowerCase().replace(a.raw.trim(),"").replace(/\d+\s*cuotas?/gi," ").replace(/\$/g," ")
+  let desc = low.replace(a.raw.trim()," ").replace(/\d+\s*cuotas?/gi," ")
     .split(/[\s,.;:!?]+/).filter(w=>w && !STOP.has(w) && !/^\d+([.,]\d+)?k?$/.test(w)).join(" ").trim();
   if(!desc) desc = tipo==="ingreso" ? "Ingreso" : "Gasto";
-  return { tipo, amount:a.amount, currency, cat:guessCat(text,tipo), desc:cap(desc), cuotas: fijo?1:cuotas, card, fijo };
+  desc = cap(desc).slice(0,80);
+  return { tipo, amount, currency, cat:guessCat(text,tipo), desc, cuotas: fijo?1:cuotas, card, fijo, date: dt?dt.date:null };
 }
 
 /* ---------- ayuda de Claude ---------- */
@@ -373,12 +426,12 @@ const CAT_LIST = GASTO_CATS.concat(INGRESO_CATS).join(", ");
 async function parseWithClaude(text){
   if(!sampleFn) return null;
   const prompt = `Sos un parser de movimientos de plata en Argentina. Jerga: luca=1000 pesos, palo=1.000.000 pesos, palo verde=1000 dólares, mango=peso, verdes=dólares.
-Devolvé SOLO un objeto JSON con estas claves: tipo ("gasto" o "ingreso"), monto (número, sin separadores), moneda ("ARS" o "USD"), categoria (una de: ${CAT_LIST}), descripcion (2 a 4 palabras), cuotas (entero, 1 si no hay), tarjeta (texto o null), fijo (true si es un gasto que se repite todos los meses, como alquiler o una suscripción).
+Devolvé SOLO un objeto JSON con estas claves: tipo ("gasto" o "ingreso"), monto (número, sin separadores), moneda ("ARS" o "USD"), categoria (una de: ${CAT_LIST}), descripcion (2 a 4 palabras), cuotas (entero, 1 si no hay), tarjeta (texto o null), fijo (true si es un gasto que se repite todos los meses, como alquiler o una suscripción), fecha ("AAAA-MM-DD" si dice cuándo fue, como "ayer" o "el viernes"; si no, null). Hoy es ${todayISO()}. Si dice "cada una" o "cada uno", el monto es el total (cantidad por precio).
 El texto puede venir de un dictado por voz, con los números escritos en palabras.
 Si no hay un monto claro, devolvé {"error":"sin monto"}.
 Texto: ${JSON.stringify(text)}`;
   try{ const r = await sampleFn.json(prompt,{modelTier:"quick"}); if(!r || r.error || !(r.monto>0)) return null;
-    return { tipo:r.tipo==="ingreso"?"ingreso":"gasto", amount:+r.monto, currency:r.moneda==="USD"?"USD":"ARS", cat: CATS[r.categoria]?r.categoria:"otros", desc:cap(r.descripcion||text), cuotas:Math.max(1,parseInt(r.cuotas||1,10)), card:r.tarjeta||null, fijo: r.tipo!=="ingreso" && r.fijo===true };
+    return { tipo:r.tipo==="ingreso"?"ingreso":"gasto", amount:+r.monto, currency:r.moneda==="USD"?"USD":"ARS", cat: CATS[r.categoria]?r.categoria:"otros", desc:cap(r.descripcion||text), cuotas:Math.max(1,parseInt(r.cuotas||1,10)), card:r.tarjeta||null, fijo: r.tipo!=="ingreso" && r.fijo===true, date: /^\d{4}-\d{2}-\d{2}$/.test(r.fecha||"") && r.fecha<=todayISO() ? r.fecha : null };
   }catch(e){ return null; }
 }
 async function compressImage(file){
@@ -434,7 +487,7 @@ async function deleteItem(id){
   state.items = state.items.filter(x=>x.id!==id); render();
   if(store){ try{ await store.col.doc(id).delete(); }catch(e){} } else lsSave();
 }
-let setTimer=null;
+let setTimer=null, cardDelPending=null;
 function saveSettings(){
   render();
   clearTimeout(setTimer);
@@ -710,7 +763,7 @@ function renderBudgets(){
       </div>`; }).join("")}
     </div></section>
   </div>`;
-  $view.querySelectorAll("[data-b]").forEach(inp=> inp.onchange=()=>{ const v=Math.max(0,num(inp.value.replace(/\./g,"")||0)); if(v) state.settings.budgets[inp.dataset.b]=v; else delete state.settings.budgets[inp.dataset.b]; saveSettings(); });
+  $view.querySelectorAll("[data-b]").forEach(inp=> inp.onchange=()=>{ const pa=parseAmount(wordsToDigits(inp.value||"")); const v=pa?Math.max(0,Math.round(pa.amount)):0; if(v) state.settings.budgets[inp.dataset.b]=v; else delete state.settings.budgets[inp.dataset.b]; saveSettings(); });
 }
 
 function renderSettings(){
@@ -759,9 +812,18 @@ function renderSettings(){
   $view.querySelectorAll("[data-ra]").forEach(b=>b.onclick=()=>{ s.rateAuto=b.dataset.ra==="1"; saveSettings(); if(s.rateAuto) updateRate(true); });
   if(q("#rateNow")) q("#rateNow").onclick=()=>updateRate(true);
   q("#rateVal").onchange=e=>{ const v=num(e.target.value.replace(/\.(?=\d{3})/g,"")); if(v>0){ s.rate=v; s.rateAuto=false; saveSettings(); } };
-  $view.querySelectorAll("[data-cn]").forEach(i=>i.onchange=()=>{ const old=s.cards[i.dataset.cn].n; s.cards[i.dataset.cn].n=i.value.trim()||old; if(s.defCard===old) s.defCard=s.cards[i.dataset.cn].n; saveSettings(); });
+  $view.querySelectorAll("[data-cn]").forEach(i=>i.onchange=()=>{ const old=s.cards[i.dataset.cn].n; const nw=i.value.trim()||old; if(nw===old) return;
+    if(s.cards.some((c,k)=>k!=i.dataset.cn && c.n.toLowerCase()===nw.toLowerCase())){ i.value=old; showToast("Ya tenés una tarjeta con ese nombre."); return; }
+    s.cards[i.dataset.cn].n=nw; if(s.defCard===old) s.defCard=nw;
+    state.items.forEach(it=>{ if(it.card===old){ it.card=nw; } }); lsSave(); saveSettings(); });
   $view.querySelectorAll("[data-cc]").forEach(i=>i.onchange=()=>{ const v=Math.min(31,Math.max(1,parseInt(i.value,10)||25)); s.cards[i.dataset.cc].cierre=v; saveSettings(); });
-  $view.querySelectorAll("[data-cdel]").forEach(b=>b.onclick=()=>{ if(s.cards.length<=1) return; s.cards.splice(+b.dataset.cdel,1); if(!s.cards.find(c=>c.n===s.defCard)) s.defCard=s.cards[0].n; saveSettings(); });
+  $view.querySelectorAll("[data-cdel]").forEach(b=>b.onclick=()=>{
+    if(s.cards.length<=1){ showToast("Tiene que quedar al menos una tarjeta."); return; }
+    const k=+b.dataset.cdel, name=s.cards[k].n; const uses=state.items.filter(it=>it.card===name && it.kind!=="mov").length;
+    const rest=s.cards.filter((c,j)=>j!==k); const dest=(rest.find(c=>c.n===s.defCard)||rest[0]).n;
+    if(uses && cardDelPending!==name){ cardDelPending=name; showToast(`${esc(name)} tiene ${uses} ${uses===1?"compra en cuotas o fijo":"compras en cuotas o fijos"}. Tocá ✕ de nuevo y pasan a ${esc(dest)}.`); return; }
+    cardDelPending=null; state.items.forEach(it=>{ if(it.card===name) it.card=dest; });
+    s.cards.splice(k,1); if(!s.cards.find(c=>c.n===s.defCard)) s.defCard=s.cards[0].n; lsSave(); saveSettings(); });
   q("#addCard").onclick=()=>{ s.cards.push({n:"Tarjeta "+(s.cards.length+1),cierre:25}); saveSettings(); };
   q("#defCard").onchange=e=>{ s.defCard=e.target.value; saveSettings(); };
   const gMsg=q("#gMsg"); const say=(el,t)=>{ el.hidden=false; el.textContent=t; };
@@ -800,7 +862,7 @@ function openForm(p, existing, photoURL){
         <div class="field"><label for="fAmt">${f.cuotas>1?"Total de la compra":"Monto"}</label><input id="fAmt" class="num" inputmode="decimal" value="${f.amount===""?"":f.amount}" required></div>
         <div class="field"><label for="fCur">Moneda</label><select id="fCur"><option value="ARS" ${f.currency==="ARS"?"selected":""}>Pesos</option><option value="USD" ${f.currency==="USD"?"selected":""}>Dólares</option></select></div>
       </div>
-      <div class="field"><label for="fDesc">Descripción</label><input id="fDesc" value="${esc(f.desc)}" placeholder="Ej: Carrefour"></div>
+      <div class="field"><label for="fDesc">Descripción</label><input id="fDesc" maxlength="80" value="${esc(f.desc)}" placeholder="Ej: Carrefour"></div>
       <div class="grid2">
         <div class="field"><label for="fCat">Categoría</label><select id="fCat">${cats.map(c=>`<option value="${c}" ${c===f.cat?"selected":""}>${esc(CATS[c].n)}</option>`).join("")}</select></div>
         <div class="field"><label for="fDate">Fecha</label><input id="fDate" type="date" value="${f.date}"></div>
@@ -843,16 +905,22 @@ function openForm(p, existing, photoURL){
 }
 
 /* ---------- carga rápida ---------- */
+let quickBusy=false;
 async function quickAdd(text){
-  text=text.trim(); if(!text) return;
+  text=text.trim(); if(!text || quickBusy) return;
+  quickBusy=true;
+  try{ await quickAddInner(text); } finally { quickBusy=false; }
+}
+async function quickAddInner(text){
+  document.getElementById("quickIn").value="";
   let p=parseLocal(text);
   if(!p){ if(sampleFn){ busyToast("Interpretando…"); p=await parseWithClaude(text); } }
-  if(!p){ showToast("No encontré el monto. Probá con “gasté 5 lucas en el súper”."); return; }
-  const it=buildItem(p);
+  if(!p){ document.getElementById("quickIn").value=text; showToast("No encontré el monto. Probá con “gasté 5 lucas en el súper”."); return; }
+  const it=buildItem(p, p.date||null);
   await saveItem(it); learnFrom(it);
   const extra = it.kind==="cuota" ? ` en ${it.cuotas} cuotas de ${money(it.total/it.cuotas,it.currency)} (${esc(it.card)})` : it.kind==="fijo" ? " todos los meses (fijo)" : "";
-  showToast(`Anotado: ${esc(it.desc)}${it.desc===CATS[it.cat].n?"":" · "+CATS[it.cat].n} · ${money(it.kind==="cuota"?it.total:it.amount,it.currency)}${extra}`, it.id);
-  document.getElementById("quickIn").value="";
+  const when = it.date!==todayISO() ? ` · ${new Date(it.date+"T12:00:00").toLocaleDateString("es-AR",{weekday:"short",day:"numeric",month:"short"})}` : "";
+  showToast(`Anotado: ${esc(it.desc)}${it.desc===CATS[it.cat].n?"":" · "+CATS[it.cat].n} · ${money(it.kind==="cuota"?it.total:it.amount,it.currency)}${extra}${when}`, it.id);
   const mk = it.kind==="cuota"? it.first : it.date.slice(0,7);
   if(state.tab==="inicio" && mk!==state.month){ state.month=mk; render(); }
 }
@@ -952,6 +1020,7 @@ function rateWhen(){
   const d=new Date(s.rateUpdated); const today=new Date().toDateString()===d.toDateString();
   return (today?"hoy ":d.toLocaleDateString("es-AR",{day:"numeric",month:"short"})+" ")+d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"});
 }
+document.addEventListener("keydown",e=>{ if(e.key==="Escape"){ const r=document.getElementById("sheetRoot"); if(r.innerHTML){ r.innerHTML=""; document.getElementById("quickIn").focus(); } } });
 document.getElementById("prevM").onclick=()=>{ state.month=addMonths(state.month,-1); render(); };
 document.getElementById("nextM").onclick=()=>{ state.month=addMonths(state.month,1); render(); };
 document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>{ state.tab=b.dataset.tab; render(); window.scrollTo(0,0); });
