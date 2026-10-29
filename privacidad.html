@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1E7A58">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<title>Bolsillo · Política de privacidad</title>
+<script>try{var t=(JSON.parse(localStorage.getItem("bolsillo:v1")||"{}").settings||{}).theme;if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<style>
+:root{--bg:#EFF3EE;--surface:#FFFFFF;--ink:#14231C;--muted:#5B6B62;--line:#D3DDD5;--accent:#1E7A58;color-scheme:light}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0F1814;--surface:#17231D;--ink:#E6EEE9;--muted:#93A59B;--line:#2A3A32;--accent:#4CC08E;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0F1814;--surface:#17231D;--ink:#E6EEE9;--muted:#93A59B;--line:#2A3A32;--accent:#4CC08E;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:max(16px,env(safe-area-inset-top,0px)) 48px}
+main{max-width:680px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+a{color:var(--accent)}
+.back{font-weight:600;text-decoration:none}
+h1{font-size:1.7rem;line-height:1.2;margin:8px 0 0;text-wrap:balance}
+h2{font-size:1.1rem;margin:18px 0 0}
+p,ul{margin:0}
+ul{padding-left:1.2em;display:flex;flex-direction:column;gap:6px}
+.box{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.muted{color:var(--muted)}
+.legal{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.85rem;border-top:1px solid var(--line);padding-top:14px;margin-top:18px}
+.legal a{color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="./">‹ Volver a Bolsillo</a>
+  <h1>Política de privacidad</h1>
+  <p class="muted">Vigente desde el 27 de octubre de 2026.</p>
+
+  <div class="box">
+    <p><b>En corto:</b> lo que cargás en Bolsillo queda guardado <b>solo en tu celu</b>. Nosotros no lo recibimos ni lo vemos. Si activás la lectura de facturas, las fotos y PDF se envían a Google (Gemini) con tu propia clave. Podés borrar todo cuando quieras desde Ajustes.</p>
+  </div>
+
+  <h2>1. Quién es el responsable</h2>
+  <p>El responsable de Bolsillo es Hernán, con domicilio en la Ciudad Autónoma de Buenos Aires, Argentina. Contacto para cualquier consulta o pedido sobre tus datos: <b>hernan_dario2007@hotmail.com</b>.</p>
+
+  <h2>2. Qué datos se usan y dónde quedan</h2>
+  <ul>
+    <li><b>Lo que cargás en la app:</b> gastos, ingresos, montos, descripciones, categorías, cuotas, gastos fijos, metas de ahorro, tu sueldo mensual, los nombres y días de cierre de tus tarjetas y tus ajustes. Se guardan en el almacenamiento del navegador de tu dispositivo, junto con copias automáticas de los últimos días. <b>No se envían a ningún servidor nuestro.</b></li>
+    <li><b>Copias de seguridad y planillas de Excel:</b> las generás vos y quedan en tu celu (carpeta Descargas). Dónde las guardes después (Drive, mail) depende de vos.</li>
+    <li><b>Clave de Gemini:</b> si la cargás, queda solo en tu dispositivo y no entra en las copias de seguridad.</li>
+    <li><b>Fotos y PDF de facturas, y frases que la app no entiende sola:</b> solo si activás Gemini en Ajustes y aceptás el aviso. Ver el punto 4.</li>
+    <li><b>Lo que nos mandás por correo:</b> si usás el Botón de arrepentimiento, el Botón de baja de servicio o nos escribís, recibimos tu nombre, tu correo y lo que nos cuentes.</li>
+  </ul>
+
+  <h2>3. Para qué se usan</h2>
+  <ul>
+    <li>Los datos de la app sirven para mostrarte tus gastos, tu plan del mes, tus cuotas, tus metas y tus límites. Ese procesamiento ocurre en tu dispositivo.</li>
+    <li>Los datos que nos mandás por correo los usamos solo para responder y gestionar tu pedido (arrepentimiento, baja o consulta), y los guardamos el tiempo necesario para eso y para cumplir obligaciones legales.</li>
+    <li>No vendemos, alquilamos ni compartimos tus datos con nadie para publicidad. No usamos tus datos para crear perfiles.</li>
+  </ul>
+
+  <h2>4. Servicios de terceros</h2>
+  <ul>
+    <li><b>Google Gemini</b> (Estados Unidos): solo si lo activás. Tu dispositivo le envía directamente, con tu clave, la foto o el PDF de la factura, o la frase a interpretar. Según los términos de Google, en el plan gratis Google puede usar ese contenido para mejorar sus productos y personas pueden revisarlo, y pide no enviar información personal. <b>Tapá nombres, DNI, CUIT y direcciones antes de sacar la foto</b>, o usá una clave del plan pago de Gemini. Rigen los términos y la política de privacidad de Google.</li>
+    <li><b>DolarApi</b>: la app consulta la cotización del dólar. Solo se envía el pedido del precio (y, como en cualquier conexión, tu dirección IP).</li>
+    <li><b>Google Fonts</b>: las tipografías se cargan desde servidores de Google, que reciben tu dirección IP.</li>
+    <li><b>GitHub Pages</b>: la app está alojada en GitHub, que puede registrar datos técnicos de las visitas (por ejemplo, tu IP) según su propia política.</li>
+  </ul>
+
+  <h2>5. Cookies y rastreo</h2>
+  <p>Bolsillo no usa cookies de publicidad ni de análisis, ni Google Analytics, ni el Pixel de Meta. Usa el almacenamiento local del navegador solo para que la app funcione (guardar tus datos y tus ajustes).</p>
+
+  <h2>6. Tus derechos y cómo borrar tus datos</h2>
+  <ul>
+    <li><b>Borrar lo que está en tu celu:</b> en Bolsillo, andá a Ajustes → Tus datos → <b>Borrar todos mis datos</b>. También se borra todo si desinstalás la app y borrás los datos del sitio en Chrome. Antes, si querés, bajá una copia.</li>
+    <li><b>Pedir acceso, corrección o eliminación de lo que nos mandaste por correo:</b> escribí a hernan_dario2007@hotmail.com con el asunto “Datos personales”. Respondemos los pedidos de acceso dentro de los 10 días corridos y los de corrección o eliminación dentro de los 5 días hábiles, como indica la Ley 25.326.</li>
+    <li>Sobre lo que enviaste a Google con Gemini, rigen las herramientas y políticas de Google.</li>
+  </ul>
+  <p class="box">El titular de los datos personales tiene la facultad de ejercer el derecho de acceso a los mismos en forma gratuita a intervalos no inferiores a seis meses, salvo que se acredite un interés legítimo al efecto conforme lo establecido en el artículo 14, inciso 3 de la Ley N° 25.326. La AGENCIA DE ACCESO A LA INFORMACIÓN PÚBLICA, en su carácter de Órgano de Control de la Ley N° 25.326, tiene la atribución de atender las denuncias y reclamos que interpongan quienes resulten afectados en sus derechos por incumplimiento de las normas vigentes en materia de protección de datos personales.</p>
+
+  <h2>7. Seguridad</h2>
+  <p>Tus datos quedan en tu dispositivo: protegelo con bloqueo de pantalla. Cualquier persona con acceso a tu celu desbloqueado puede ver la app. La conexión con los servicios externos es cifrada (HTTPS).</p>
+
+  <h2>8. Edad</h2>
+  <p>Bolsillo es para mayores de 18 años.</p>
+
+  <h2>9. Plan Premium y pagos</h2>
+  <p>Hoy Bolsillo no cobra ni guarda datos de pago. Antes de habilitar el plan Premium vamos a actualizar esta política para explicar qué datos se usan para cobrar y quién los procesa.</p>
+
+  <h2>10. Cambios</h2>
+  <p>Si cambiamos esta política, lo vas a ver en la app antes de que el cambio aplique, con la fecha de vigencia actualizada.</p>
+
+  <nav class="legal" aria-label="Información legal">
+    <a href="arrepentimiento.html">BOTÓN DE ARREPENTIMIENTO</a>
+    <a href="arrepentimiento.html#baja">BOTÓN DE BAJA DE SERVICIO</a>
+    <a href="terminos.html">Términos y condiciones</a>
+    <a href="https://autogestion.produccion.gob.ar/consumidores" target="_blank" rel="noopener">Defensa de las y los Consumidores. Para reclamos. Ingrese aquí</a>
+  </nav>
+</main>
+</body>
+</html>

@@ -83,6 +83,13 @@ header.top{display:flex;align-items:center;justify-content:space-between;gap:12p
 .dots i{width:8px;height:8px;border-radius:50%;background:var(--line)}
 .dots i.on{background:var(--accent)}
 .ln .chip{white-space:nowrap}
+.legaltop{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:.7rem;letter-spacing:.03em;margin-top:-8px}
+.legaltop a,footer.legal a{color:var(--muted)}
+footer.legal{display:flex;flex-wrap:wrap;gap:6px 14px;justify-content:center;font-size:.78rem;padding-top:6px;text-align:center}
+.check a{color:var(--accent)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.links{display:flex;flex-direction:column;gap:8px}
+.links a{color:var(--accent);font-weight:600}
 .wrap,.wrap > *{min-width:0}
 .alert,.ledger .ln span:first-child{overflow-wrap:anywhere;min-width:0}
 .toast{font-size:.9rem;padding:8px 10px;border-radius:10px;background:var(--sunk);display:flex;justify-content:space-between;gap:8px;align-items:center}
@@ -202,6 +209,7 @@ nav.tabs button[aria-current="page"]{color:var(--accent)}
       <button id="nextM" aria-label="Mes siguiente">›</button>
     </div>
   </header>
+  <nav class="legaltop" aria-label="Arrepentimiento y baja"><a href="arrepentimiento.html">BOTÓN DE ARREPENTIMIENTO</a><a href="arrepentimiento.html#baja">BOTÓN DE BAJA DE SERVICIO</a></nav>
 
   <form class="quick" id="quickForm" autocomplete="off">
     <div class="qrow">
@@ -228,6 +236,13 @@ nav.tabs button[aria-current="page"]{color:var(--accent)}
 
   <main id="view"></main>
   <p class="note" id="storeNote" hidden></p>
+  <footer class="legal" aria-label="Información legal">
+    <a href="arrepentimiento.html">BOTÓN DE ARREPENTIMIENTO</a>
+    <a href="arrepentimiento.html#baja">BOTÓN DE BAJA DE SERVICIO</a>
+    <a href="privacidad.html">Política de privacidad</a>
+    <a href="terminos.html">Términos y condiciones</a>
+    <a href="https://autogestion.produccion.gob.ar/consumidores" target="_blank" rel="noopener">Defensa de las y los Consumidores. Para reclamos. Ingrese aquí</a>
+  </footer>
 </div>
 
 <nav class="tabs" aria-label="Secciones"><div class="in">
@@ -493,11 +508,11 @@ Si no se puede leer el total, devolvé {"error":"ilegible"}.`;
 /* ---------- Gemini (lee fotos y frases difíciles) ---------- */
 const GKEY="bolsillo:gemini";
 const DEFAULT_MODEL="gemini-3.6-flash";
-function gLoad(){ try{ return JSON.parse(localStorage.getItem(GKEY)||"null")||{key:"",model:DEFAULT_MODEL}; }catch(e){ return {key:"",model:DEFAULT_MODEL}; } }
+function gLoad(){ try{ return JSON.parse(localStorage.getItem(GKEY)||"null")||{key:"",model:DEFAULT_MODEL,consent:false}; }catch(e){ return {key:"",model:DEFAULT_MODEL,consent:false}; } }
 function gSave(g){ try{ localStorage.setItem(GKEY,JSON.stringify(g)); }catch(e){} setupGemini(); }
 function blobToBase64(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(",")[1]); r.onerror=rej; r.readAsDataURL(blob); }); }
 async function geminiJSON(prompt, opts={}){
-  const g=gLoad(); if(!g.key) throw {code:"no_key"};
+  const g=gLoad(); if(!g.key) throw {code:"no_key"}; if(!g.consent) throw {code:"no_consent"};
   const parts=[{text:prompt}];
   for(const b of (opts.images||[])) parts.push({inline_data:{mime_type:b.type||"image/jpeg", data: await blobToBase64(b)}});
   const url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(g.model||DEFAULT_MODEL)}:generateContent`;
@@ -512,7 +527,7 @@ async function geminiJSON(prompt, opts={}){
   const txt=(data.candidates?.[0]?.content?.parts||[]).map(p=>p.text||"").join("").trim().replace(/^```(json)?|```$/g,"");
   try{ return JSON.parse(txt); }catch(e){ throw {code:"invalid_json"}; }
 }
-function setupGemini(){ const g=gLoad(); sampleFn = g.key ? {json:geminiJSON} : null; canImages = !!g.key; }
+function setupGemini(){ const g=gLoad(); const on=!!(g.key && g.consent); sampleFn = on ? {json:geminiJSON} : null; canImages = on; }
 
 /* ---------- persistencia ---------- */
 const LS="bolsillo:v1";
@@ -640,6 +655,24 @@ function applyTheme(){
   const m=document.querySelector('meta[name="theme-color"]'); if(m) m.setAttribute("content", dark? "#0F1814" : "#1E7A58");
 }
 if(mqDark && mqDark.addEventListener) mqDark.addEventListener("change", applyTheme);
+
+/* ---------- aceptación de privacidad y términos ---------- */
+const LEGAL="bolsillo:legal", LEGAL_VER="2026-10-27";
+function legalAccepted(){ try{ const v=JSON.parse(localStorage.getItem(LEGAL)||"null"); return !!(v && v.ver===LEGAL_VER); }catch(e){ return true; } }
+function showConsent(after){
+  const root=document.getElementById("sheetRoot");
+  root.innerHTML=`<div class="sheet-bg"><form class="sheet" id="lform" role="dialog" aria-modal="true" aria-label="Antes de empezar">
+    <h2>Antes de empezar</h2>
+    <p style="margin:0">Bolsillo guarda tus datos solo en este celu y no se los manda a nadie. La única excepción la elegís vos: si activás la lectura de facturas, las fotos y PDF van a Google (Gemini). Para usar Bolsillo tenés que ser mayor de 18 años.</p>
+    <label class="check" for="lAcc"><input type="checkbox" id="lAcc"><span>Tengo más de 18 años y acepto la <a href="privacidad.html">Política de privacidad</a> y los <a href="terminos.html">Términos y condiciones</a>.</span></label>
+    <button class="btn primary" type="submit" id="lGo" disabled>Empezar</button>
+  </form></div>`;
+  const acc=root.querySelector("#lAcc"), go=root.querySelector("#lGo");
+  acc.onchange=()=>{ go.disabled=!acc.checked; };
+  root.querySelector("#lform").onsubmit=e=>{ e.preventDefault(); if(!acc.checked) return;
+    try{ localStorage.setItem(LEGAL, JSON.stringify({ver:LEGAL_VER, at:Date.now()})); }catch(err){}
+    root.innerHTML=""; if(after) after(); };
+}
 
 /* ---------- tutorial ---------- */
 const TUT="bolsillo:tut";
@@ -1058,9 +1091,10 @@ function renderSettings(){
     </section>
     <section class="card">
       <span class="label">Leer facturas con foto (Gemini)</span>
-      <p class="note" style="margin:0">${gLoad().key?"Clave cargada. Ya podés sacar fotos a tus facturas.":"Sin clave, la foto no funciona. El resto de la app sí."} La clave queda guardada solo en este celu y no entra en la copia de seguridad.</p>
+      <p class="note" style="margin:0">${gLoad().key&&gLoad().consent?"Activado. Ya podés leer facturas con foto o PDF.":gLoad().key?"Falta marcar la casilla para activarlo.":"Sin clave, la foto no funciona. El resto de la app sí."} La clave queda guardada solo en este celu y no entra en la copia de seguridad.</p>
       <div class="field"><label for="gKey">Clave de la API de Gemini</label><input id="gKey" type="password" autocomplete="off" value="${esc(gLoad().key)}" placeholder="Pegala acá"></div>
       <div class="field"><label for="gModel">Modelo</label><input id="gModel" value="${esc(gLoad().model||DEFAULT_MODEL)}"></div>
+      <label class="check" for="gCons"><input type="checkbox" id="gCons" ${gLoad().consent?"checked":""}><span>Entiendo que las fotos, los PDF y las frases que Bolsillo no entiende sola se envían a Google con mi clave. En el plan gratis de Gemini, Google puede usarlas para mejorar sus productos y personas pueden revisarlas, y pide no mandar datos personales: voy a tapar nombres, DNI, CUIT y direcciones. <a href="privacidad.html">Más info</a></span></label>
       <div class="row"><button class="btn ghost" id="gSaveBtn">Guardar clave</button><button class="btn ghost" id="gTestBtn">Probar</button></div>
       <p class="note" id="gMsg" style="margin:0" hidden></p>
     </section>
@@ -1075,6 +1109,19 @@ function renderSettings(){
       <p class="note" style="margin:0">Bolsillo guarda sola una copia por día de los últimos días que la usaste. Sirve si algo sale mal; si perdés el celu, no: para eso está la copia en Drive.</p>
       ${snaps.length? `<div class="ledger">${snaps.map((sn,i)=>`<div class="ln"><span>${fecha(sn.at)}${sn.label?" ("+esc(sn.label)+")":""} · ${sn.items.length} mov.</span><button type="button" class="chip" data-snap="${i}">${state.ui.snapPending===i?"Tocá de nuevo":"Volver a esta"}</button></div>`).join("")}</div>` : '<p class="note" style="margin:0">Todavía no hay copias automáticas.</p>'}
       <div class="row"><button class="btn ghost" id="tutBtn">Ver tutorial</button></div>
+      <span class="label" style="margin-top:6px">Borrar tus datos</span>
+      <p class="note" style="margin:0">Borra de este celu todos tus movimientos, metas, ajustes, copias automáticas y la clave de Gemini. No se puede deshacer: si querés, bajá antes una copia.</p>
+      <div class="row"><button class="btn danger" id="wipeBtn">Borrar todos mis datos</button></div>
+    </section>
+    <section class="card">
+      <span class="label">Legal</span>
+      <div class="links">
+        <a href="privacidad.html">Política de privacidad</a>
+        <a href="terminos.html">Términos y condiciones</a>
+        <a href="arrepentimiento.html">BOTÓN DE ARREPENTIMIENTO</a>
+        <a href="arrepentimiento.html#baja">BOTÓN DE BAJA DE SERVICIO</a>
+      </div>
+      <p class="note" style="margin:0">Consultas y pedidos sobre tus datos: <b>hernan_dario2007@hotmail.com</b></p>
     </section>
   </div>`;
   const q=id=>$view.querySelector(id);
@@ -1097,8 +1144,9 @@ function renderSettings(){
   q("#addCard").onclick=()=>{ s.cards.push({n:"Tarjeta "+(s.cards.length+1),cierre:25}); saveSettings(); };
   q("#defCard").onchange=e=>{ s.defCard=e.target.value; saveSettings(); };
   const gMsg=q("#gMsg"); const say=(el,t)=>{ el.hidden=false; el.textContent=t; };
-  q("#gSaveBtn").onclick=()=>{ gSave({key:q("#gKey").value.trim(), model:q("#gModel").value.trim()||DEFAULT_MODEL}); say(gMsg, q("#gKey").value.trim()?"Clave guardada.":"Clave borrada."); };
-  q("#gTestBtn").onclick=async()=>{ gSave({key:q("#gKey").value.trim(), model:q("#gModel").value.trim()||DEFAULT_MODEL}); say(gMsg,"Probando…");
+  const gVals=()=>({key:q("#gKey").value.trim(), model:q("#gModel").value.trim()||DEFAULT_MODEL, consent:q("#gCons").checked});
+  q("#gSaveBtn").onclick=()=>{ const v=gVals(); gSave(v); say(gMsg, !v.key?"Clave borrada.":v.consent?"Clave guardada. Lectura de facturas activada.":"Clave guardada, pero falta marcar la casilla para activarla."); };
+  q("#gTestBtn").onclick=async()=>{ const v=gVals(); gSave(v); if(v.key && !v.consent){ say(gMsg,"Marcá la casilla para activar la lectura con Gemini."); return; } say(gMsg,"Probando…");
     try{ const r=await geminiJSON('Respondé solo este JSON: {"ok":true}'); say(gMsg, r&&r.ok?"Funciona. Ya podés leer facturas con foto.":"Respondió algo raro. Probá de nuevo."); }
     catch(e){ say(gMsg, ({no_key:"Pegá la clave primero.",bad_key:"Google rechazó la clave. Copiala de nuevo, completa.",bad_model:"Ese modelo no existe. Probá con gemini-flash-latest.",rate_limited:"Límite gratis alcanzado por ahora. Probá en un rato.",offline:"Sin conexión a internet."})[e.code]||"No funcionó. Revisá la clave y la conexión."); } };
   q("#expBtn").onclick=()=>{ doExport(); showToast("Copia descargada. La encontrás en la carpeta Descargas; subila a Drive."); };
@@ -1134,6 +1182,13 @@ function renderSettings(){
     state.items=JSON.parse(JSON.stringify(sn.items)); Object.assign(state.settings, JSON.parse(JSON.stringify(sn.settings))); syncCats(); lsSave(); render();
     showToast(`Volviste a la copia del ${fecha(sn.at)}. Lo que tenías recién quedó guardado por las dudas.`); });
   q("#tutBtn").onclick=()=>showTutorial(0);
+  let wipeArmed=false;
+  q("#wipeBtn").onclick=async e=>{
+    if(!wipeArmed){ wipeArmed=true; e.target.textContent="Tocá de nuevo: se borra todo"; return; }
+    try{ [LS,SNAP,GKEY,TUT,LEGAL].forEach(k=>localStorage.removeItem(k)); }catch(err){}
+    try{ if(window.caches) await caches.delete("bolsillo-compartido"); }catch(err){}
+    location.reload();
+  };
 }
 
 /* ---------- formulario (hoja) ---------- */
@@ -1243,7 +1298,7 @@ document.getElementById("micBtn").onclick=()=>{
   try{ rec.start(); }catch(e){ showToast("No pude abrir el micrófono. Probá de nuevo."); }
 };
 document.getElementById("camBtn").onclick=()=>{
-  if(!canImages){ showToast("Para leer facturas, cargá tu clave de Gemini en Ajustes. Mientras, cargala a mano."); openForm({tipo:"gasto",amount:"",currency:"ARS",cat:"otros",desc:"",cuotas:1,card:null},null); return; }
+  if(!canImages){ showToast("Para leer facturas, activá Gemini en Ajustes: tu clave y la casilla de privacidad. Mientras, cargala a mano."); openForm({tipo:"gasto",amount:"",currency:"ARS",cat:"otros",desc:"",cuotas:1,card:null},null); return; }
   const root=document.getElementById("sheetRoot");
   root.innerHTML=`<div class="sheet-bg" id="pbg"><div class="sheet" role="dialog" aria-label="Cargar factura">
     <div class="sechead"><h2>Cargar factura</h2><button type="button" class="chip" id="pclose">Cerrar</button></div>
@@ -1258,7 +1313,7 @@ document.getElementById("camBtn").onclick=()=>{
   root.querySelector("#pFile").onclick=()=>{ close(); document.getElementById("fileIn").click(); };
 };
 async function processReceiptFile(file){
-  if(!canImages){ showToast("Para leer facturas, cargá tu clave de Gemini en Ajustes."); return; }
+  if(!canImages){ showToast("Para leer facturas, activá Gemini en Ajustes: tu clave y la casilla de privacidad."); return; }
   const isPDF = file.type==="application/pdf" || /\.pdf$/i.test(file.name||"");
   if(!isPDF && !/^image\//.test(file.type||"")){ showToast("Ese archivo no es una foto ni un PDF."); return; }
   if(file.size > 18*1024*1024){ showToast("El archivo es muy pesado (más de 18 MB)."); return; }
@@ -1319,7 +1374,7 @@ function rateWhen(){
   const d=new Date(s.rateUpdated); const today=new Date().toDateString()===d.toDateString();
   return (today?"hoy ":d.toLocaleDateString("es-AR",{day:"numeric",month:"short"})+" ")+d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"});
 }
-document.addEventListener("keydown",e=>{ if(e.key==="Escape"){ const r=document.getElementById("sheetRoot"); if(r.innerHTML){ r.innerHTML=""; document.getElementById("quickIn").focus(); } } });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape"){ const r=document.getElementById("sheetRoot"); if(r.innerHTML && !r.querySelector("#lform")){ r.innerHTML=""; document.getElementById("quickIn").focus(); } } });
 document.getElementById("prevM").onclick=()=>{ state.month=addMonths(state.month,-1); render(); };
 document.getElementById("nextM").onclick=()=>{ state.month=addMonths(state.month,1); render(); };
 document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>{ state.tab=b.dataset.tab; render(); window.scrollTo(0,0); });
@@ -1331,7 +1386,10 @@ dailySnap(); render();
 updateRate(false); setInterval(()=>updateRate(false), 5*60*1000);
 document.addEventListener("visibilitychange",()=>{ if(!document.hidden) updateRate(false); });
 handleShared();
-(function(){ let seen=true; try{ seen=!!localStorage.getItem(TUT); }catch(e){} if(!seen && !state.items.length && !/[?&]compartido=1/.test(location.search)) showTutorial(0); })();
+(function(){ if(/[?&]compartido=1/.test(location.search)) return;
+  let seen=true; try{ seen=!!localStorage.getItem(TUT); }catch(e){}
+  const tut=()=>{ if(!seen && !state.items.length) showTutorial(0); };
+  if(!legalAccepted()) showConsent(tut); else tut(); })();
 // pedir al navegador que no borre los datos
 try{ navigator.storage && navigator.storage.persist && navigator.storage.persist(); }catch(e){}
 if("serviceWorker" in navigator){ window.addEventListener("load",()=>{ navigator.serviceWorker.register("sw.js").catch(()=>{}); }); }

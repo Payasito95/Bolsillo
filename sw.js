@@ -1,8 +1,8 @@
 // Bolsillo: guarda la app en el celu para que abra sin señal
 // y recibe facturas desde el menú Compartir de Android.
-const CACHE = "bolsillo-v2";
+const CACHE = "bolsillo-v3";
 const SHARE = "bolsillo-compartido";
-const FILES = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable.png"];
+const FILES = ["./", "./index.html", "./privacidad.html", "./terminos.html", "./arrepentimiento.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./icon-maskable.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
