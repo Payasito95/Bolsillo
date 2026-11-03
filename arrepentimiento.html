@@ -3,21 +3,28 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#1E7A58">
+<meta name="theme-color" content="#F2F3F7">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif&display=swap">
 <title>Bolsillo · Botón de arrepentimiento y de baja</title>
 <script>try{var t=(JSON.parse(localStorage.getItem("bolsillo:v1")||"{}").settings||{}).theme;if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 <style>
-:root{--bg:#EFF3EE;--surface:#FFFFFF;--ink:#14231C;--muted:#5B6B62;--line:#D3DDD5;--accent:#1E7A58;color-scheme:light}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0F1814;--surface:#17231D;--ink:#E6EEE9;--muted:#93A59B;--line:#2A3A32;--accent:#4CC08E;color-scheme:dark}}
-:root[data-theme="dark"]{--bg:#0F1814;--surface:#17231D;--ink:#E6EEE9;--muted:#93A59B;--line:#2A3A32;--accent:#4CC08E;color-scheme:dark}
+:root{--bg:#F2F3F7;--surface:#FFFFFF;--sunk:#E7E9F0;--ink:#030407;--muted:#555C6B;--line:#D9DCE5;--field:#7D8496;--accent:#1558C9;--link:#1558C9;--on-accent:#FFFFFF;color-scheme:light;accent-color:var(--accent)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#030407;--surface:#0D0F15;--sunk:#171A23;--ink:#F3F5F8;--muted:#9BA2B0;--line:#252935;--field:#6B7385;--accent:#D4FF24;--link:#7EA6F2;--on-accent:#030407;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#030407;--surface:#0D0F15;--sunk:#171A23;--ink:#F3F5F8;--muted:#9BA2B0;--line:#252935;--field:#6B7385;--accent:#D4FF24;--link:#7EA6F2;--on-accent:#030407;color-scheme:dark}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:max(16px,env(safe-area-inset-top,0px)) 48px}
 main{max-width:680px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
-a{color:var(--accent)}
-.back{font-weight:600;text-decoration:none}
+a{color:var(--link);text-underline-offset:3px}
+::selection{background:#D4FF24;color:#030407}
+h1,h2{font-family:"Instrument Serif",Georgia,serif;font-weight:400;letter-spacing:-.01em}
+h1{font-size:2.4rem!important;line-height:1.05!important}
+h2{font-size:1.45rem!important}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.back{font-weight:600;text-decoration:none;display:inline-flex;align-items:center;min-height:44px}
 h1{font-size:1.7rem;line-height:1.2;margin:8px 0 0;text-wrap:balance}
 h2{font-size:1.1rem;margin:18px 0 0}
 p,ul{margin:0}
@@ -25,28 +32,26 @@ ul{padding-left:1.2em;display:flex;flex-direction:column;gap:6px}
 .box{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
 .muted{color:var(--muted)}
 .legal{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.85rem;border-top:1px solid var(--line);padding-top:14px;margin-top:18px}
-.legal a{color:var(--muted)}
-.seg{display:flex;background:var(--line);border-radius:10px;padding:3px;gap:3px}
-.seg button{flex:1;border:0;background:none;padding:10px 8px;border-radius:8px;font:inherit;font-weight:600;color:var(--muted);cursor:pointer}
-.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink)}
+.legal a{color:var(--muted);display:inline-flex;align-items:center;min-height:44px}
+.seg{display:flex;background:var(--sunk);border-radius:12px;padding:3px;gap:3px}
+.seg button{flex:1;border:0;background:none;padding:10px 8px;min-height:48px;border-radius:10px;font:inherit;font-weight:600;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
 form{display:flex;flex-direction:column;gap:12px}
 label.f{display:flex;flex-direction:column;gap:4px;font-weight:600}
 label.f span{font-weight:400;color:var(--muted);font-size:.85rem}
-input[type=text],input[type=email],textarea{border:1px solid #7A8D82;background:var(--bg);color:var(--ink);border-radius:10px;padding:11px;font:inherit;width:100%}
+input[type=text],input[type=email],textarea{border:1px solid var(--field);background:var(--bg);color:var(--ink);border-radius:10px;padding:11px;font:inherit;width:100%}
 textarea{min-height:80px;resize:vertical}
 .check{display:flex;gap:10px;align-items:flex-start}
 .check input{width:20px;height:20px;margin-top:3px;accent-color:var(--accent);flex:none}
-.btn{border:0;border-radius:10px;min-height:48px;padding:0 16px;font:inherit;font-weight:700;background:var(--accent);color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
-.btn.ghost{background:var(--line);color:var(--ink)}
-.err{color:#BF3E2B;font-weight:600}
+.btn{border:0;border-radius:10px;min-height:48px;padding:0 16px;font:inherit;font-weight:700;background:var(--accent);color:var(--on-accent);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
+.btn.ghost{background:var(--sunk);color:var(--ink)}
+.err{color:#C42B1C;font-weight:600}
+:root[data-theme="dark"] .err{color:#FF7A66}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .err{color:#FF7A66}}
 .code{font:700 1.4rem/1.2 ui-monospace,Menlo,monospace;letter-spacing:.04em;overflow-wrap:anywhere}
 .row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:.85rem;margin:0}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .btn{color:#06140D}}
-:root[data-theme="dark"] .btn{color:#06140D}
-:root[data-theme="dark"] input[type=text],:root[data-theme="dark"] input[type=email],:root[data-theme="dark"] textarea{border-color:#5E7468}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) input[type=text],:root:not([data-theme="light"]) input[type=email],:root:not([data-theme="light"]) textarea{border-color:#5E7468}}
 </style>
 </head>
 <body>
