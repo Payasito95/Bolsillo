@@ -665,9 +665,20 @@ function avgSpend(month){
   const avg={}; if(months) for(const [c,v] of Object.entries(sums)) avg[c]=Math.ceil(v/months/1000)*1000;
   return {avg, months};
 }
+/* ---------- regla 50/30/20 ---------- */
+const GROUP_DEF={super:"nec",servicios:"nec",transporte:"nec",salud:"nec",hogar:"nec",mascotas:"nec"};
+function budgetMode(){ const st=state.settings; return st.budgetMode || (st.autoBudgets?"auto":"manual"); }
+function groupOf(cat){ const g=(state.settings.groups||{})[cat]; return g || GROUP_DEF[cat] || "gus"; }
+function rule503020(month){
+  const P=planFor(month); const r=+state.settings.rate||1; const inc=P.ingreso>0? (state.settings.view==="ARS"?P.ingreso:P.ingreso*r) : 0;
+  let nec=0, gus=0;
+  entriesFor(month).filter(e=>e.tipo==="gasto").forEach(e=>{ const a=e.currency==="USD"?e.amount*r:e.amount; if(groupOf(e.cat)==="nec") nec+=a; else gus+=a; });
+  const resto=inc-nec-gus;
+  return {inc, nec, gus, resto, capNec:inc*.5, capGus:inc*.3, goal:inc*.2};
+}
 function budgetsFor(month){
   const manual={...(state.settings.budgets||{})};
-  if(!state.settings.autoBudgets) return manual;
+  if(budgetMode()!=="auto") return manual;
   return {...avgSpend(month).avg, ...manual};
 }
 
@@ -875,6 +886,11 @@ function renderHome(){
     const spentARS=E.filter(e=>e.tipo==="gasto"&&e.cat===cat).reduce((s,e)=>s+(e.currency==="USD"?e.amount*r:e.amount),0);
     const p=spentARS/lim; if(p>=1) alerts.push(`<div class="alert bad">Te pasaste en <b>${esc(CATS[cat].n)}</b>: llevás ${money(spentARS,"ARS")} de ${money(lim,"ARS")}.</div>`);
     else if(p>=0.8) alerts.push(`<div class="alert">Ojo con <b>${esc(CATS[cat].n)}</b>: usaste el ${Math.round(p*100)}% del límite.</div>`);
+  }
+  if(budgetMode()==="503020"){ const G=rule503020(state.month);
+    [["nec","Necesidades",G.nec,G.capNec],["gus","Gustos",G.gus,G.capGus]].forEach(([k,n,sp,cap])=>{ if(!(cap>0)) return; const p=sp/cap;
+      if(p>=1) alerts.push(`<div class="alert bad">50/30/20: <b>${n}</b> va ${money(sp,"ARS")} y el tope es ${money(cap,"ARS")}.</div>`);
+      else if(p>=.8) alerts.push(`<div class="alert">50/30/20: <b>${n}</b> ya usó el ${Math.round(p*100)}% de su parte.</div>`); });
   }
   const savePct = inc>0? Math.round((bal/inc)*100):null;
   const due=backupDue(); const goals=state.settings.goals||[];
@@ -1112,14 +1128,15 @@ function renderCuotas(){
 function renderBudgets(){
   const E=entriesFor(state.month); const r=+state.settings.rate||1; const st=state.settings;
   const spent={}; E.filter(e=>e.tipo==="gasto").forEach(e=>{ spent[e.cat]=(spent[e.cat]||0)+(e.currency==="USD"?e.amount*r:e.amount); });
-  const {avg, months}=avgSpend(state.month); const manual=st.budgets||{}; const auto=!!st.autoBudgets;
-  const intro = auto ? (months ? `Se arman con tu promedio de ${months===1?"el último mes":"los últimos "+months+" meses"} y se ajustan solos cada mes. Si escribís un tope, ese queda fijo; borralo para volver al automático.` : "Todavía no hay meses anteriores con gastos para calcularlos. Mientras, poné los topes a mano.") : "Poné un tope en pesos para cada categoría.";
+  const {avg, months}=avgSpend(state.month); const manual=st.budgets||{}; const mode=budgetMode(); const auto=mode==="auto"; const r503=mode==="503020";
+  const intro = r503 ? "Tu ingreso del mes se reparte: 50% para necesidades, 30% para gustos y 20% para ahorrar o pagar deudas. Las cuotas y los fijos cuentan en el grupo de su categoría. Abajo podés poner topes a mano por categoría si querés." : auto ? (months ? `Se arman con tu promedio de ${months===1?"el último mes":"los últimos "+months+" meses"} y se ajustan solos cada mes. Si escribís un tope, ese queda fijo; borralo para volver al automático.` : "Todavía no hay meses anteriores con gastos para calcularlos. Mientras, poné los topes a mano.") : "Poné un tope en pesos para cada categoría.";
   $view.innerHTML = `
   <div style="display:flex;flex-direction:column;gap:14px">
     <h2>Límites por categoría</h2>
-    <div class="seg" role="group" aria-label="Cómo se arman los límites"><button type="button" data-ab="1" aria-pressed="${auto}">Automáticos</button><button type="button" data-ab="0" aria-pressed="${!auto}">A mano</button></div>
+    <div class="seg" role="group" aria-label="Cómo se arman los límites"><button type="button" data-ab="auto" aria-pressed="${auto}">Automáticos</button><button type="button" data-ab="manual" aria-pressed="${mode==="manual"}">A mano</button><button type="button" data-ab="503020" aria-pressed="${r503}">50/30/20</button></div>
     <p class="muted" style="margin:0">${intro} Te aviso en Inicio al 80% y cuando te pasás.</p>
-    <section class="card"><div class="cats">
+    ${r503?rule503020HTML(state.month):""}
+    <section class="card">${r503?`<span class="label">Topes a mano por categoría (opcional)</span>`:""}<div class="cats">
     ${GASTO_CATS.map(c=>{ const man=+manual[c]||0; const au=auto?(avg[c]||0):0; const lim=man||au; const sp=spent[c]||0; const p=lim? sp/lim:0;
       const col = !lim? CATS[c].c : p>=1? "var(--bad)": p>=.8? "var(--warn)":"var(--good)";
       const tag = man ? (auto?'<span class="pill">a mano</span>':"") : (au?'<span class="pill">auto</span>':"");
@@ -1132,10 +1149,28 @@ function renderBudgets(){
       </div>`; }).join("")}
     </div></section>
   </div>`;
-  $view.querySelectorAll("[data-ab]").forEach(b=>b.onclick=()=>{ st.autoBudgets=b.dataset.ab==="1"; saveSettings(); });
+  $view.querySelectorAll("[data-ab]").forEach(b=>b.onclick=()=>{ st.budgetMode=b.dataset.ab; st.autoBudgets=b.dataset.ab==="auto"; saveSettings(); });
+  $view.querySelectorAll("[data-grp]").forEach(b=>b.onclick=()=>{ const [c,g]=b.dataset.grp.split(":"); st.groups=st.groups||{}; if((GROUP_DEF[c]||"gus")===g) delete st.groups[c]; else st.groups[c]=g; saveSettings(); });
   $view.querySelectorAll("[data-b]").forEach(inp=> inp.onchange=()=>{ const v=Math.max(0,Math.round(parseMoneyInput(inp.value))); if(v) st.budgets[inp.dataset.b]=v; else delete st.budgets[inp.dataset.b]; saveSettings(); });
 }
 
+function rule503020HTML(month){
+  const G=rule503020(month); if(!(G.inc>0)) return `<div class="alert">Cargá tu sueldo en Plan para usar la regla 50/30/20.</div>`;
+  const bar=(sp,cap)=>{ const p=cap>0?sp/cap:0; const col=p>=1?"var(--bad)":p>=.8?"var(--warn)":"var(--good)"; return `<div class="bar"><i style="width:${Math.min(100,p*100)}%;background:${col}"></i></div>`; };
+  const okGoal=G.resto>=G.goal;
+  return `<section class="card">
+    <div class="cats">
+      <div class="catrow"><span class="name">Necesidades · 50%</span><span class="num">${money(G.nec,"ARS")} de ${money(G.capNec,"ARS")}</span>${bar(G.nec,G.capNec)}</div>
+      <div class="catrow"><span class="name">Gustos · 30%</span><span class="num">${money(G.gus,"ARS")} de ${money(G.capGus,"ARS")}</span>${bar(G.gus,G.capGus)}</div>
+      <div class="catrow"><span class="name">Ahorro o deudas · 20%</span><span class="num" style="color:${G.resto<0?"var(--bad)":"inherit"}">${money(G.resto,"ARS")} de ${money(G.goal,"ARS")}</span>
+        <div class="bar"><i style="width:${G.goal>0?Math.max(0,Math.min(100,G.resto/G.goal*100)):0}%;background:${okGoal?"var(--good)":"var(--bad)"}"></i></div></div>
+    </div>
+    <p class="note" style="margin:0">${G.resto<0?`Este mes gastás ${money(-G.resto,"ARS")} más de lo que entra: no queda nada para el 20%.`:okGoal?"Llegás al 20%: separalo apenas cobres.":`Te quedan ${money(G.resto,"ARS")} para ahorrar o pagar deudas; faltan ${money(G.goal-G.resto,"ARS")} para el 20%.`}</p>
+    <span class="label" style="margin-top:4px">Qué categoría va en cada grupo</span>
+    <div class="list">${GASTO_CATS.map(c=>{ const g=groupOf(c); return `<div class="item" style="grid-template-columns:1fr auto;cursor:default"><span class="t"><b><i class="dot" style="background:${CATS[c].c};display:inline-block;margin-right:6px"></i>${esc(CATS[c].n)}</b></span>
+      <span class="seg" role="group" aria-label="Grupo de ${esc(CATS[c].n)}" style="min-width:170px"><button type="button" data-grp="${c}:nec" aria-pressed="${g==="nec"}">Necesidad</button><button type="button" data-grp="${c}:gus" aria-pressed="${g==="gus"}">Gusto</button></span></div>`; }).join("")}</div>
+  </section>`;
+}
 function renderSettings(){
   const s=state.settings; const th=s.theme||"auto";
   const sel = GASTO_CATS.includes(state.ui.catSel)? state.ui.catSel : "comida"; const subs=(s.subcats||{})[sel]||[]; const custom=s.customCats||[];
