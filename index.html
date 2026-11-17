@@ -170,7 +170,7 @@ section.card > .label,.card > span.label{font-size:.9rem;color:var(--ink);font-w
 .field{display:flex;flex-direction:column;gap:4px}
 .field input,.field select{border:1px solid var(--field);background:var(--bg);color:var(--ink);border-radius:12px;padding:11px;font:inherit;width:100%;min-height:48px}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
-.cardline{display:grid;grid-template-columns:minmax(0,1fr) 90px auto;gap:8px;align-items:end}
+.cardline{display:grid;grid-template-columns:minmax(0,1fr) 72px 72px auto;gap:8px;align-items:end}
 .iconbtn{border:0;background:var(--sunk);border-radius:12px;width:48px;height:48px}
 
 /* tabs */
@@ -411,6 +411,23 @@ function statementMonth(dateISO,cardName){
   const k = monthKey(d);
   return d.getDate() > (+card.cierre||25) ? addMonths(k,1) : k;
 }
+function cardOf(n){ return state.settings.cards.find(c=>c.n===n)||null; }
+// día de vencimiento del resumen: el que cargó el usuario o, si no, unos 13 días después del cierre
+function vtoDay(card){ if(!card) return null; if(+card.vto) return +card.vto; return new Date(2026,0,(+card.cierre||25)+13).getDate(); }
+// mes en que se PAGA lo que comprás ese día con esa tarjeta (mes del vencimiento del resumen)
+function payMonth(dateISO,cardName){
+  const card=cardOf(cardName)||{cierre:25}; const c=+card.cierre||25;
+  const k=statementMonth(dateISO,cardName);
+  if(+card.vto) return +card.vto>c ? k : addMonths(k,1);
+  const [y,m]=k.split("-").map(Number); return monthKey(new Date(y,m-1,c+13));
+}
+function movMonth(it){ return it.pm || (it.date? it.date.slice(0,7) : null); }
+// pendiente de pago en ese mes: movimientos marcados y fijos sin tarjeta del mes actual sin marcar
+function isPending(e, month){
+  if(e.kind==="mov") return e.tipo==="gasto" && !!e.pend;
+  if(e.kind==="fijo") return !e.card && month===monthKey(new Date()) && !(e.paid||[]).includes(month);
+  return false;
+}
 
 /* ---------- parser de lenguaje criollo ---------- */
 function parseAmount(text){
@@ -602,15 +619,18 @@ function buildItem(p, dateISO, existingId){
   }
   if(p.tipo==="gasto" && p.cuotas>1){
     const card = p.card || state.settings.defCard;
-    return { id:existingId||uid("c_"), kind:"cuota", tipo:"gasto", total:p.amount, cuotas:p.cuotas, currency:p.currency, cat:p.cat, sub, desc:p.desc, date, card, first: statementMonth(date,card) };
+    return { id:existingId||uid("c_"), kind:"cuota", tipo:"gasto", total:p.amount, cuotas:p.cuotas, currency:p.currency, cat:p.cat, sub, desc:p.desc, date, card, first: payMonth(date,card) };
   }
-  return { id:existingId||uid("m_"), kind:"mov", tipo:p.tipo, amount:p.amount, currency:p.currency, cat:p.cat, sub, desc:p.desc, date, card:p.card||null };
+  const m = { id:existingId||uid("m_"), kind:"mov", tipo:p.tipo, amount:p.amount, currency:p.currency, cat:p.cat, sub, desc:p.desc, date, card:p.card||null };
+  if(p.tipo==="gasto" && m.card && cardOf(m.card)) m.pm = payMonth(date, m.card);
+  if(p.tipo==="gasto" && p.pend) m.pend = true;
+  return m;
 }
 // entradas del mes elegido (cuotas aparecen en el mes de su resumen)
 function entriesFor(month){
   const out=[];
   for(const it of state.items){
-    if(it.kind==="mov" && it.date && it.date.slice(0,7)===month) out.push({...it, view: toView(it.amount,it.currency)});
+    if(it.kind==="mov" && movMonth(it)===month) out.push({...it, view: toView(it.amount,it.currency)});
     if(it.kind==="cuota"){ const n=monthDiff(it.first,month); if(n>=0 && n<it.cuotas){ const per=it.total/it.cuotas; out.push({...it, n:n+1, amount:per, view:toView(per,it.currency)}); } }
     if(it.kind==="fijo" && fijoActive(it,month)){ out.push({...it, date: month+"-"+String(Math.min(it.day||1,daysIn(month))).padStart(2,"0"), view:toView(it.amount,it.currency)}); }
   }
@@ -731,8 +751,11 @@ function planFor(month){
   const E = entriesFor(month);
   const inc = state.settings.income||{amount:0,currency:"ARS"};
   const expected = inc.amount>0 ? toView(inc.amount,inc.currency) : 0;
-  const cobrado = E.filter(e=>e.tipo==="ingreso").reduce((s,e)=>s+e.view,0);
-  const ingreso = Math.max(expected, cobrado);
+  // el sueldo cobrado reemplaza al esperado; los ingresos extra se suman aparte
+  const sueldoCob = E.filter(e=>e.tipo==="ingreso" && e.cat==="sueldo").reduce((s,e)=>s+e.view,0);
+  const extras = E.filter(e=>e.tipo==="ingreso" && e.cat!=="sueldo").reduce((s,e)=>s+e.view,0);
+  const cobrado = sueldoCob + extras;
+  const ingreso = Math.max(expected, sueldoCob) + extras;
   const fijos = E.filter(e=>e.kind==="fijo").reduce((s,e)=>s+e.view,0);
   const cuotas = E.filter(e=>e.kind==="cuota").reduce((s,e)=>s+e.view,0);
   const variables = E.filter(e=>e.kind==="mov" && e.tipo==="gasto").reduce((s,e)=>s+e.view,0);
@@ -753,7 +776,7 @@ function planFor(month){
     weekSpent = E.filter(e=>e.kind==="mov"&&e.tipo==="gasto"&&e.date>=a&&e.date<=b).reduce((s,e)=>s+e.view,0);
     weekLabel = `${mon.getDate()} al ${sun.getDate()} de ${sun.toLocaleDateString("es-AR",{month:"long"})}`;
   }
-  return {ingreso, expected, cobrado, fijos, cuotas, metas, variables, paraVivir, queda, daysLeft, perDay, perWeek: perDay*7, weekBudget, weekSpent, weekLabel, dim, d};
+  return {ingreso, expected, cobrado, sueldoCob, extras, fijos, cuotas, metas, variables, paraVivir, queda, daysLeft, perDay, perWeek: perDay*7, weekBudget, weekSpent, weekLabel, dim, d};
 }
 function envelopeHTML(month){
   const v=state.settings.view; const P=planFor(month);
@@ -768,13 +791,44 @@ function envelopeHTML(month){
   return `<div class="envelope ${neg?"neg":""}">
     <h2 class="env-title">${titleMonth}</h2>
     <div class="big">${money(P.queda,v)}</div>
-    <div class="env-sub">${money(P.ingreso,v)} de sueldo − ${money(P.fijos+P.cuotas+P.metas,v)} ya comprometidos − ${money(P.variables,v)} gastados</div>
+    <div class="env-sub">${money(P.ingreso,v)} de ${P.extras?"ingresos":"sueldo"} − ${money(P.fijos+P.cuotas+P.metas,v)} ya comprometidos − ${money(P.variables,v)} gastados</div>
     ${P.daysLeft>0 && !neg ? `<div class="split">
       <div><small>Por semana</small><b>${money(P.perWeek,v)}</b></div>
       <div><small>Por día</small><b>${money(P.perDay,v)}</b></div></div>` : neg ? `<div style="font-weight:600">Te pasaste ${money(-P.queda,v)} este mes. Lo que viene, mejor solo lo necesario.</div>`:""}
     ${P.d===0 ? `<div class="week"><div><span>Semana del ${esc(P.weekLabel)}</span><span class="num nowrap">${money(P.weekSpent,v)} / ${money(P.weekBudget,v)}</span></div><div class="weekbar"><i style="width:${wp}%"></i></div></div>`:""}
     <div><button type="button" data-go="plan">Ver el plan completo</button></div>
   </div>`;
+}
+function needHTML(month){
+  const v=state.settings.view; const P=planFor(month); const E=entriesFor(month).filter(e=>e.tipo==="gasto");
+  if(!E.length) return "";
+  const groups={};
+  E.forEach(e=>{ const c=e.card && cardOf(e.card) ? e.card : ""; groups[c]=(groups[c]||0)+e.view; });
+  const rows=Object.entries(groups).map(([c,t])=>({c,t,d:c?vtoDay(cardOf(c)):99})).sort((a,b)=>a.d-b.d);
+  const total=E.reduce((s,e)=>s+e.view,0); const diff=P.ingreso-total;
+  const pend=entriesFor(month).filter(e=>isPending(e,month)); const pendTot=pend.reduce((s,e)=>s+e.view,0);
+  const hasUSD=E.some(e=>e.currency==="USD");
+  return `<section class="card" id="needCard">
+    <div class="sechead"><h2>Necesitás en ${esc(monthName(month,true))}</h2><span class="num" style="font-size:1.25rem;font-weight:700">${money(total,v)}</span></div>
+    <div class="ledger">
+      ${rows.map(r=>`<div class="ln"><span>${r.c?`${esc(r.c)} <small class="muted">· vence el ${r.d}</small>`:`Sin tarjeta <small class="muted">· alquiler, préstamo, efectivo</small>`}</span><span>${money(r.t,v)}</span></div>`).join("")}
+      <div class="ln total"><span>Total a pagar</span><span>${money(total,v)}</span></div>
+      <div class="ln"><span>${P.extras?"Sueldo + ingresos extra":"Sueldo"}</span><span>${money(P.ingreso,v)}</span></div>
+      <div class="ln total"><span>${diff<0?"Te falta":"Te sobra"}</span><span style="color:${diff<0?"var(--bad)":"inherit"}">${money(Math.abs(diff),v)}</span></div>
+    </div>
+    ${hasUSD?`<p class="note" style="margin:0">Los dólares están al ${esc(state.settings.rateName||"")} sin impuestos. Si los pagás en pesos, salen más caros.</p>`:""}
+    ${pend.length?`<span class="label" style="margin-top:6px">Por pagar todavía · ${money(pendTot,v)}</span>
+      <div class="list">${pend.map(e=>`<div class="item" style="grid-template-columns:1fr auto auto;cursor:default">
+        <span class="t"><b>${esc(e.desc)}${e.currency==="USD"?'<span class="pill usd">USD</span>':""}</b><small>${e.kind==="fijo"?"Fijo · día "+(e.day||1):new Date(e.date+"T12:00:00").toLocaleDateString("es-AR",{day:"numeric",month:"short"})}</small></span>
+        <span class="amt">${money(e.amount,e.currency)}</span>
+        <button type="button" class="chip" data-paid="${e.id}">Pagado</button></div>`).join("")}</div>`:""}
+  </section>`;
+}
+function bindNeed(month){
+  $view.querySelectorAll("[data-paid]").forEach(b=>b.onclick=()=>{ const it=state.items.find(x=>x.id===b.dataset.paid); if(!it) return;
+    if(it.kind==="fijo") saveItem({...it, paid:[...(it.paid||[]).filter(x=>x!==month), month]});
+    else { const n={...it}; delete n.pend; saveItem(n); }
+    showToast(`Marcado como pagado: ${esc(it.desc)}.`); });
 }
 function bindEnvelope(){
   const f=$view.querySelector("#incForm"); if(f) f.onsubmit=e=>{ e.preventDefault(); const raw=wordsToDigits($view.querySelector("#incIn").value); const a=parseAmount(raw); if(a&&a.amount>0){ state.settings.income={amount:a.amount,currency:(a.forceUSD||USD_RX.test(raw))?"USD":"ARS"}; saveSettings(); } };
@@ -828,6 +882,7 @@ function renderHome(){
   <div style="display:flex;flex-direction:column;gap:14px">
     ${due?`<div class="banner" role="status"><b>Hace ${due} días que no guardás una copia</b><span class="muted">Tus datos viven solo en este celu. Bajá la copia y subila a Drive: si perdés el celu, es lo único que los salva.</span><div class="row"><button class="btn primary" id="bkNow">Bajar copia</button><button class="btn ghost" id="bkLater">En unos días</button></div></div>`:""}
     ${envelopeHTML(state.month)}
+    ${needHTML(state.month)}
     <div class="balance">
       <div class="sechead"><span class="label">Saldo del mes</span>${curToggle()}</div>
       <div class="big ${bal<0?"neg":""}">${money(bal,v)}</div>
@@ -854,7 +909,7 @@ function renderHome(){
       <div id="movList"></div>
     </section>
   </div>`;
-  bindCur(); bindEnvelope();
+  bindCur(); bindEnvelope(); bindNeed(state.month);
   $view.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{ state.tab=b.dataset.go; render(); window.scrollTo(0,0); });
   $view.querySelector("#addManual").onclick=()=>openForm({tipo:"gasto",amount:"",currency:"ARS",cat:"otros",desc:"",cuotas:1,card:null},null);
   $view.querySelector("#searchIn").oninput=e=>{ state.search=e.target.value; fillMovList(); };
@@ -892,10 +947,11 @@ function searchRow(it){
 function itemRow(e){
   const d=new Date((e.date||todayISO())+"T12:00:00");
   const when = d.toLocaleDateString("es-AR",{day:"numeric",month:"short"});
-  const sub = e.kind==="cuota" ? `Cuota ${e.n}/${e.cuotas} · ${esc(e.card||"")}` : e.kind==="fijo" ? `Fijo · día ${e.day||1}${e.card?" · "+esc(e.card):""}` : `${when} · ${esc(catLabel(e))}`;
+  const sub = e.kind==="cuota" ? `Cuota ${e.n}/${e.cuotas} · ${esc(e.card||"")}` : e.kind==="fijo" ? `Fijo · día ${e.day||1}${e.card?" · "+esc(e.card):""}` : `${when} · ${esc(catLabel(e))}${e.card?" · "+esc(e.card):""}`;
+  const pen = isPending(e, (e.date||"").slice(0,7)) ? '<span class="pill" style="color:var(--bad)">Pendiente</span>' : "";
   return `<button class="item" data-item="${e.id}">
     <i class="dot" style="background:${CATS[e.cat]?.c||"#888"}"></i>
-    <span class="t"><b>${esc(e.desc)}${e.currency==="USD"?'<span class="pill usd">USD</span>':""}</b><small>${sub}</small></span>
+    <span class="t"><b>${esc(e.desc)}${e.currency==="USD"?'<span class="pill usd">USD</span>':""}${pen}</b><small>${sub}</small></span>
     <span class="amt ${e.tipo==="ingreso"?"in":""}">${e.tipo==="ingreso"?"+":"−"}${money(e.amount,e.currency).replace("−","")}</span></button>`;
 }
 
@@ -904,7 +960,7 @@ function renderPlan(){
   const fijos=state.items.filter(it=>it.kind==="fijo" && fijoActive(it,state.month));
   const goals=state.settings.goals||[];
   const nextMonths=[1,2,3].map(i=>{ const k=addMonths(state.month,i); const p=planFor(k); return {k,p}; });
-  const cobradoNote = P.cobrado>P.expected && P.expected>0 ? `<p class="note" style="margin:0">Este mes cobraste más de lo esperado, así que uso lo que cargaste: ${money(P.cobrado,v)}.</p>` : (P.cobrado===0 && P.expected>0 && P.d===0) ? `<p class="note" style="margin:0">Todavía no anotaste el cobro de este mes. Mientras, uso tu sueldo habitual.</p>`:"";
+  const cobradoNote = P.sueldoCob>P.expected && P.expected>0 ? `<p class="note" style="margin:0">Este mes cobraste más sueldo de lo esperado, así que uso lo que cargaste: ${money(P.sueldoCob,v)}.</p>` : (P.sueldoCob===0 && P.expected>0 && P.d===0) ? `<p class="note" style="margin:0">Todavía no anotaste el cobro de este mes. Mientras, uso tu sueldo habitual.</p>`:"";
   $view.innerHTML = `
   <div style="display:flex;flex-direction:column;gap:14px">
     <div class="sechead"><h2>Plan de ${esc(monthName(state.month,true))}</h2>${curToggle()}</div>
@@ -912,7 +968,8 @@ function renderPlan(){
     <section class="card">
       <span class="label">Cómo se calcula</span>
       <div class="ledger">
-        <div class="ln"><span>Sueldo del mes</span><span>${money(P.ingreso,v)}</span></div>
+        <div class="ln"><span>Sueldo del mes</span><span>${money(P.ingreso-P.extras,v)}</span></div>
+        ${P.extras?`<div class="ln"><span>+ Ingresos extra</span><span>${money(P.extras,v)}</span></div>`:""}
         <div class="ln"><span>− Gastos fijos (${fijos.length})</span><span>${money(P.fijos,v)}</span></div>
         <div class="ln"><span>− Cuotas de tarjeta</span><span>${money(P.cuotas,v)}</span></div>
         ${P.metas?`<div class="ln"><span>− Ahorro para metas</span><span>${money(P.metas,v)}</span></div>`:""}
@@ -1023,7 +1080,7 @@ function renderCuotas(){
   const monthTotal = k => state.items.filter(it=>it.kind==="cuota").reduce((s,it)=>{ const n=monthDiff(it.first,k); return (n>=0&&n<it.cuotas)? s+toView(it.total/it.cuotas,it.currency):s; },0);
   const months = Array.from({length:6},(_,i)=>addMonths(cur,i)); const vals=months.map(monthTotal); const mx=Math.max(...vals,1);
   const cards = state.settings.cards.map(c=>{
-    const k = statementMonth(todayISO(), c.n);
+    const k = payMonth(todayISO(), c.n);
     const tot = state.items.filter(it=>it.kind==="cuota"&&it.card===c.n).reduce((s,it)=>{ const n=monthDiff(it.first,k); return (n>=0&&n<it.cuotas)? s+toView(it.total/it.cuotas,it.currency):s; },0);
     return {c,k,tot};
   });
@@ -1033,7 +1090,7 @@ function renderCuotas(){
     <div class="sechead"><h2>Cuotas</h2>${curToggle()}</div>
     <section class="card">
       <span class="label">Próximos resúmenes</span>
-      ${cards.map(({c,k,tot})=>`<div class="statement"><div><b>${esc(c.n)}</b><div class="muted" style="font-size:.85rem">Cierra el ${c.cierre} de ${esc(monthName(k,true))}</div></div><div class="num" style="font-size:1.2rem;font-weight:600">${money(tot,v)}</div></div>`).join("")}
+      ${cards.map(({c,k,tot})=>`<div class="statement"><div><b>${esc(c.n)}</b><div class="muted" style="font-size:.85rem">Cierra el ${c.cierre} · vence el ${vtoDay(c)} de ${esc(monthName(k,true))}</div></div><div class="num" style="font-size:1.2rem;font-weight:600">${money(tot,v)}</div></div>`).join("")}
       <div class="months" aria-label="Cuotas por mes, próximos 6 meses">${months.map((k,i)=>`<div class="m"><em>${vals[i]?moneyShort(vals[i],v):""}</em><i style="height:${vals[i]/mx*80}%"></i><span>${esc(monthName(k))}</span></div>`).join("")}</div>
       <div class="muted" style="font-size:.85rem">Te falta pagar en total <b class="num">${money(remaining,v)}</b> en cuotas.</div>
     </section>
@@ -1102,10 +1159,12 @@ function renderSettings(){
       ${s.rateAuto?'<div class="row"><button class="btn ghost" id="rateNow">Actualizar ahora</button></div>':""}
     </section>
     <section class="card">
-      <span class="label">Tarjetas y día de cierre</span>
+      <span class="label">Tarjetas: día de cierre y de vencimiento</span>
+      <p class="note" style="margin:0">Las compras con tarjeta se cuentan en el mes en que vence el resumen, que es cuando las pagás.</p>
       ${s.cards.map((c,i)=>`<div class="cardline">
         <div class="field"><label for="cn${i}">Tarjeta</label><input id="cn${i}" data-cn="${i}" value="${esc(c.n)}"></div>
         <div class="field"><label for="cc${i}">Cierre</label><input id="cc${i}" data-cc="${i}" class="num" inputmode="numeric" value="${c.cierre}"></div>
+        <div class="field"><label for="cv${i}">Vence</label><input id="cv${i}" data-cv="${i}" class="num" inputmode="numeric" value="${+c.vto?c.vto:""}" placeholder="${vtoDay(c)}"></div>
         <button class="iconbtn" data-cdel="${i}" aria-label="Quitar ${esc(c.n)}">✕</button></div>`).join("")}
       <div class="row"><button class="btn ghost" id="addCard">+ Agregar tarjeta</button></div>
       <div class="field"><label for="defCard">Tarjeta por defecto para cuotas</label><select id="defCard">${s.cards.map(c=>`<option ${c.n===s.defCard?"selected":""}>${esc(c.n)}</option>`).join("")}</select></div>
@@ -1165,6 +1224,7 @@ function renderSettings(){
     s.cards[i.dataset.cn].n=nw; if(s.defCard===old) s.defCard=nw;
     state.items.forEach(it=>{ if(it.card===old){ it.card=nw; } }); lsSave(); saveSettings(); });
   $view.querySelectorAll("[data-cc]").forEach(i=>i.onchange=()=>{ const v=Math.min(31,Math.max(1,parseInt(i.value,10)||25)); s.cards[i.dataset.cc].cierre=v; saveSettings(); });
+  $view.querySelectorAll("[data-cv]").forEach(i=>i.onchange=()=>{ const n=parseInt(i.value,10); const c=s.cards[i.dataset.cv]; if(n>=1&&n<=31) c.vto=n; else delete c.vto; saveSettings(); });
   $view.querySelectorAll("[data-cdel]").forEach(b=>b.onclick=()=>{
     if(s.cards.length<=1){ showToast("Tiene que quedar al menos una tarjeta."); return; }
     const k=+b.dataset.cdel, name=s.cards[k].n; const uses=state.items.filter(it=>it.card===name && it.kind!=="mov").length;
@@ -1225,7 +1285,7 @@ function renderSettings(){
 /* ---------- formulario (hoja) ---------- */
 function fromItem(it){
   if(it.kind==="fijo") return {tipo:"gasto",amount:it.amount,currency:it.currency,cat:it.cat,sub:it.sub||null,desc:it.desc,cuotas:1,card:it.card,date:it.date,fijo:true};
-  return it.kind==="cuota" ? {tipo:"gasto",amount:it.total,currency:it.currency,cat:it.cat,sub:it.sub||null,desc:it.desc,cuotas:it.cuotas,card:it.card,date:it.date} : {tipo:it.tipo,amount:it.amount,currency:it.currency,cat:it.cat,sub:it.sub||null,desc:it.desc,cuotas:1,card:it.card,date:it.date}; }
+  return it.kind==="cuota" ? {tipo:"gasto",amount:it.total,currency:it.currency,cat:it.cat,sub:it.sub||null,desc:it.desc,cuotas:it.cuotas,card:it.card,date:it.date} : {tipo:it.tipo,amount:it.amount,currency:it.currency,cat:it.cat,sub:it.sub||null,desc:it.desc,cuotas:1,card:it.card,date:it.date,pend:!!it.pend}; }
 function openForm(p, existing, photoURL){
   const root=document.getElementById("sheetRoot");
   const f={...p, date:p.date||todayISO()};
@@ -1253,11 +1313,12 @@ function openForm(p, existing, photoURL){
         <div class="field"><label for="fCuo">Cuotas</label><select id="fCuo">${[1,2,3,4,6,9,12,18,24].concat(f.cuotas&&![1,2,3,4,6,9,12,18,24].includes(f.cuotas)?[f.cuotas]:[]).map(n=>`<option value="${n}" ${n==f.cuotas?"selected":""}>${n===1?"Un pago":n+" cuotas"}</option>`).join("")}</select></div>
         <div class="field"><label for="fCard">Tarjeta</label><select id="fCard"><option value="">${f.cuotas>1?"Elegí":"Ninguna / efectivo"}</option>${state.settings.cards.map(c=>`<option ${c.n===f.card?"selected":""}>${esc(c.n)}</option>`).join("")}</select></div>
       </div>${f.cuotas>1 && +f.amount>0?`<p class="note" style="margin:0">${f.cuotas} cuotas de ${money(f.amount/f.cuotas,f.currency)}.</p>`:""}`:""}
+      ${f.tipo==="gasto" && !f.fijo && !(f.cuotas>1)?`<label class="check" for="fPend"><input type="checkbox" id="fPend" ${f.pend?"checked":""}><span><b>Todavía no lo pagué</b><br><small class="muted">Queda en “Por pagar” hasta que toques Pagado.</small></span></label>`:""}
       <button class="btn primary" type="submit">Guardar</button>
       ${existing?`<button class="btn danger" type="button" id="sdel">${existing.kind==="fijo" ? (confirmDel?"Tocá de nuevo para dar de baja":"Dar de baja") : (confirmDel?"Tocá de nuevo para borrar":"Borrar")}</button>`:""}
     </form></div>`;
     const g=id=>root.querySelector(id);
-    const sync=()=>{ f.amount=g("#fAmt").value; f.currency=g("#fCur").value; f.desc=g("#fDesc").value; f.cat=g("#fCat").value; f.sub=g("#fSub")?(g("#fSub").value||null):null; f.date=g("#fDate").value||todayISO(); if(g("#fCuo")){ f.cuotas=+g("#fCuo").value; } if(g("#fCard")) f.card=g("#fCard").value||null; if(g("#fFijo")) f.fijo=g("#fFijo").checked; };
+    const sync=()=>{ f.amount=g("#fAmt").value; f.currency=g("#fCur").value; f.desc=g("#fDesc").value; f.cat=g("#fCat").value; f.sub=g("#fSub")?(g("#fSub").value||null):null; f.date=g("#fDate").value||todayISO(); if(g("#fCuo")){ f.cuotas=+g("#fCuo").value; } if(g("#fCard")) f.card=g("#fCard").value||null; if(g("#fFijo")) f.fijo=g("#fFijo").checked; f.pend = g("#fPend") ? g("#fPend").checked : false; };
     g("#sclose").onclick=close; g("#sbg").onclick=e=>{ if(e.target.id==="sbg") close(); };
     g("#fCat").onchange=()=>{ sync(); f.sub=null; draw(); };
     root.querySelectorAll("[data-t]").forEach(b=>b.onclick=()=>{ sync(); f.tipo=b.dataset.t; if(f.tipo==="ingreso"){f.cuotas=1; f.fijo=false;} draw(); });
@@ -1273,8 +1334,14 @@ function openForm(p, existing, photoURL){
       const amt=num(String(f.amount).replace(/\.(?=\d{3}(\D|$))/g,"")); if(!(amt>0)){ g("#fAmt").focus(); return; }
       const isFijo = f.tipo==="gasto" && !!f.fijo;
       const newKind = isFijo ? "fijo" : (f.tipo==="gasto"&&f.cuotas>1) ? "cuota" : "mov";
-      const it=buildItem({tipo:f.tipo,amount:amt,currency:f.currency,cat:f.cat,sub:f.tipo==="gasto"?f.sub:null,desc:cap(f.desc)||CATS[f.cat].n,cuotas:f.tipo==="gasto"&&!isFijo?f.cuotas:1,card:f.card,fijo:isFijo}, f.date, existing && existing.kind===newKind ? existing.id : null);
+      const it=buildItem({tipo:f.tipo,amount:amt,currency:f.currency,cat:f.cat,sub:f.tipo==="gasto"?f.sub:null,desc:cap(f.desc)||CATS[f.cat].n,cuotas:f.tipo==="gasto"&&!isFijo?f.cuotas:1,card:f.card,fijo:isFijo,pend:f.pend}, f.date, existing && existing.kind===newKind ? existing.id : null);
       if(existing && existing.kind==="fijo" && it.kind==="fijo" && f.date===existing.date){ it.start=existing.start; it.until=existing.until||null; }
+      if(existing && existing.kind==="fijo" && it.kind==="fijo" && existing.paid) it.paid=existing.paid;
+      // si no cambió la fecha ni la tarjeta, se respeta el mes en que ya figuraba
+      if(existing && existing.kind===it.kind && f.date===existing.date && (existing.card||null)===(it.card||null)){
+        if(it.kind==="cuota" && existing.first) it.first=existing.first;
+        if(it.kind==="mov"){ if(existing.pm) it.pm=existing.pm; else delete it.pm; }
+      }
       if(existing && it.id!==existing.id) deleteItem(existing.id);
       saveItem(it); learnFrom(it); close();
       const label = it.kind==="fijo" ? `Anotado como fijo: ${esc(it.desc)} · ${money(it.amount,it.currency)} todos los meses` : `Anotado: ${esc(it.desc)} · ${money(it.kind==="cuota"?it.total:it.amount,it.currency)}`;
@@ -1303,10 +1370,10 @@ async function quickAddInner(text){
   if(!p){ document.getElementById("quickIn").value=text; showToast("No encontré el monto. Probá con “gasté 5 lucas en el súper”."); return; }
   const it=buildItem(p, p.date||null);
   await saveItem(it); learnFrom(it);
-  const extra = it.kind==="cuota" ? ` en ${it.cuotas} cuotas de ${money(it.total/it.cuotas,it.currency)} (${esc(it.card)})` : it.kind==="fijo" ? " todos los meses (fijo)" : "";
+  const extra = it.kind==="cuota" ? ` en ${it.cuotas} cuotas de ${money(it.total/it.cuotas,it.currency)} (${esc(it.card)}, desde ${esc(monthName(it.first,true))})` : it.kind==="fijo" ? " todos los meses (fijo)" : it.pm && it.pm!==it.date.slice(0,7) ? ` · lo pagás en ${esc(monthName(it.pm,true))} (${esc(it.card)})` : "";
   const when = it.date!==todayISO() ? ` · ${new Date(it.date+"T12:00:00").toLocaleDateString("es-AR",{weekday:"short",day:"numeric",month:"short"})}` : "";
   showToast(`Anotado: ${esc(it.desc)}${it.desc===CATS[it.cat].n?"":" · "+CATS[it.cat].n} · ${money(it.kind==="cuota"?it.total:it.amount,it.currency)}${extra}${when}`, it.id);
-  const mk = it.kind==="cuota"? it.first : it.date.slice(0,7);
+  const mk = it.kind==="cuota"? it.first : it.kind==="mov" ? movMonth(it) : it.date.slice(0,7);
   if(state.tab==="inicio" && mk!==state.month){ state.month=mk; render(); }
 }
 document.getElementById("quickForm").onsubmit=e=>{ e.preventDefault(); quickAdd(document.getElementById("quickIn").value); };
